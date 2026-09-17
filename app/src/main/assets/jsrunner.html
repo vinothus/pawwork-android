@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<script src="/assets/pyodide/pyodide.js"></script>
+</head>
+<body>
+<script>
+var pyodide = null;
+window.addEventListener('load', function () { initPyodide(); });
+function initPyodide() {
+  if (pyodide) { AndroidBridge.ready('ok'); return; }
+  loadPyodide({ indexURL: '/assets/pyodide/' }).then(function (p) {
+    pyodide = p;
+    AndroidBridge.ready('ok');
+  }).catch(function (e) {
+    AndroidBridge.ready('err:' + e);
+  });
+}
+function runPy(code) {
+  if (!pyodide) { AndroidBridge.result('err|pyodide not loaded'); return; }
+  var buf = '';
+  try {
+    pyodide.setStdout({ batched: function (s) { buf += s + '\n'; } });
+    pyodide.setStderr({ batched: function (s) { buf += s + '\n'; } });
+  } catch (e) { /* old pyodide */ }
+  try {
+    var r = pyodide.runPython(code);
+    var extra = (r === undefined || r === null) ? '' : '\n(result: ' + r + ')';
+    AndroidBridge.result('ok|' + buf + extra);
+  } catch (e) {
+    AndroidBridge.result('err|' + buf + e);
+  }
+}
+</script>
+</body>
+</html>

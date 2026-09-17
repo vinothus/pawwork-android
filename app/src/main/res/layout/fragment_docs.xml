@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/paw_bg">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:padding="12dp"
+        android:text="📑 Office Documents"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:textColor="@color/paw_primary" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:padding="4dp"
+        android:gravity="center">
+
+        <TextView android:id="@+id/btnGenDocx" android:layout_width="0dp" android:layout_height="40dp"
+            android:layout_weight="1" android:layout_margin="4dp" android:text="📄 DOCX" android:textAllCaps="true"
+            android:background="@drawable/circle_btn" android:textColor="@color/white" android:textSize="11sp"
+            android:gravity="center" android:padding="4dp" />
+        <TextView android:id="@+id/btnGenXlsx" android:layout_width="0dp" android:layout_height="40dp"
+            android:layout_weight="1" android:layout_margin="4dp" android:text="📊 XLSX" android:textAllCaps="true"
+            android:background="@drawable/circle_btn" android:textColor="@color/white" android:textSize="11sp"
+            android:gravity="center" android:padding="4dp" />
+        <TextView android:id="@+id/btnGenPptx" android:layout_width="0dp" android:layout_height="40dp"
+            android:layout_weight="1" android:layout_margin="4dp" android:text="📑 PPTX" android:textAllCaps="true"
+            android:background="@drawable/circle_btn" android:textColor="@color/white" android:textSize="11sp"
+            android:gravity="center" android:padding="4dp" />
+        <TextView android:id="@+id/btnGenPdf" android:layout_width="0dp" android:layout_height="40dp"
+            android:layout_weight="1" android:layout_margin="4dp" android:text="📕 PDF" android:textAllCaps="true"
+            android:background="@drawable/circle_btn" android:textColor="@color/white" android:textSize="11sp"
+            android:gravity="center" android:padding="4dp" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/emptyText"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center"
+        android:text="No documents yet.\nTap a button above to generate one!"
+        android:textSize="14sp"
+        android:textColor="#999999" />
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/docsRecycler"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:padding="8dp"
+        android:clipToPadding="false" />
+</LinearLayout>

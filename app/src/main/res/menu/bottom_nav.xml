@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:id="@+id/nav_chat" android:icon="@android:drawable/ic_menu_send" android:title="Chat" />
+    <item android:id="@+id/nav_docs" android:icon="@android:drawable/ic_menu_save" android:title="Docs" />
+    <item android:id="@+id/nav_search" android:icon="@android:drawable/ic_menu_search" android:title="Search" />
+    <item android:id="@+id/nav_files" android:icon="@android:drawable/ic_menu_gallery" android:title="Files" />
+    <item android:id="@+id/nav_auto" android:icon="@android:drawable/ic_menu_agenda" android:title="Tasks" />
+</menu>

@@ -1,0 +1,22 @@
+# Gradle / Android build outputs
+build/
+.gradle/
+local.properties
+captures/
+*.apk
+*.aab
+*.keystore
+*.jks
+!app/src/main/assets/template.apk
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.DS_Store
+
+# Misc
+*.log
+screenshots/_sweep/
+# compiled test helpers
+*.class

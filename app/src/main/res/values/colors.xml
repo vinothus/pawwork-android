@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="paw_primary">#FF8A00</color>
+    <color name="paw_primary_dark">#C96A00</color>
+    <color name="paw_accent">#FFB74D</color>
+    <color name="paw_bg">#FFF8EF</color>
+    <color name="white">#FFFFFF</color>
+    <color name="black">#000000</color>
+</resources>
