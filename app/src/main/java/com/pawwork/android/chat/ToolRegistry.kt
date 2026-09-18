@@ -179,6 +179,23 @@ object ToolRegistry {
         }
     }
 
+    // ------------------------------------------------------------------ zen
+    /**
+     * Toolset advertised to the opencode.ai Zen free tier: the official CLI's
+     * 11 tool schemas FIRST (the gateway's free-tier gate requires their names,
+     * see OpenCodeTools) followed by PawWork's own tools, so the model can still
+     * use run_code / build_apk / create_folder & friends on-device.
+     */
+    private var zenCached: JSONArray? = null
+    fun zenTools(context: Context): JSONArray {
+        zenCached?.let { return it }
+        val merged = JSONArray()
+        val official = OpenCodeTools.tools(context)
+        for (i in 0 until official.length()) merged.put(official.get(i))
+        for (i in 0 until tools.length()) merged.put(tools.get(i))
+        return merged.also { zenCached = it }
+    }
+
     // ------------------------------------------------------------------ execute
     fun execute(context: Context, name: String, arguments: String): String {
         val args = try { JSONObject(arguments) } catch (_: Exception) { JSONObject() }
@@ -212,6 +229,20 @@ object ToolRegistry {
                 "call_library" -> com.pawwork.android.lab.AndroidLab.callLibrary(context, args)
                 "invoke_app" -> com.pawwork.android.lab.AndroidLab.invokeApp(context, args)
                 "list_apps" -> com.pawwork.android.lab.AndroidLab.listInstalledApps(context)
+                // ---- Official OpenCode CLI tools (Zen free tier advertises these;
+                // map to the closest on-device implementations where possible) ----
+                "read" -> readFile(context, args.optString("path").ifEmpty { args.optString("file_path") })
+                "write" -> writeFile(context, args)
+                "edit" -> editFile(context, args)
+                "glob" -> globFiles(context, args.optString("pattern").ifEmpty { args.optString("path") })
+                "grep" -> grepContent(context, args.optString("pattern").ifEmpty { args.optString("query") })
+                "webfetch", "web_fetch" -> webFetch(args.optString("url"))
+                "websearch", "web_search" -> webSearch(args.optString("query"))
+                "bash" -> JSONObject().put("error",
+                    "bash is not available in PawWork Android's sandbox — use run_code (lang=python|javascript) instead").toString()
+                "skill" -> JSONObject().put("error", "skill loading is a desktop-PawWork feature; not available on-device").toString()
+                "task" -> JSONObject().put("error", "subagent task launching is not available on-device").toString()
+                "todowrite" -> JSONObject().put("ok", true).put("note", "on-device todo list not implemented; acknowledged").toString()
                 else -> JSONObject().put("error", "unknown tool: $name").toString()
             }
         } catch (e: Exception) {
@@ -429,6 +460,47 @@ object ToolRegistry {
         return JSONObject().put("ok", ok || f.isDirectory)
             .put("path", rel)
             .put("error", if (ok || f.isDirectory) "" else "could not create folder").toString()
+    }
+
+    // -------- official opencode-tool implementations (read/write above) --------
+    private fun editFile(context: Context, args: JSONObject): String {
+        val f = safeFile(context, args.optString("path").ifEmpty { args.optString("file_path") })
+        if (!f.exists()) return JSONObject().put("error", "not found: ${f.path}").toString()
+        val old = args.optString("old_string").ifEmpty { args.optString("old") }
+        val new = args.optString("new_string").ifEmpty { args.optString("new") }
+        if (old.isEmpty()) return JSONObject().put("error", "old_string is required for edit").toString()
+        val text = f.readText()
+        if (!text.contains(old)) return JSONObject().put("error", "old_string not found (edit applies once)").toString()
+        f.writeText(text.replaceFirst(old, new))
+        return JSONObject().put("ok", true).put("path", args.optString("path")).toString()
+    }
+
+    private fun globFiles(context: Context, pattern: String): String {
+        // '*' and '?' wildcards matched against the basename, case-insensitive
+        val rx = Regex("^" + Regex.escape(pattern).replace("\\*", ".*").replace("\\?", ".") + "$",
+            RegexOption.IGNORE_CASE)
+        val arr = JSONArray()
+        context.filesDir.walkTopDown().filter { it.isFile && rx.matches(it.name) }
+            .forEach { arr.put(fileEntry(it)) }
+        return JSONObject().put("pattern", pattern).put("matches", arr).toString()
+    }
+
+    private fun grepContent(context: Context, query: String): String {
+        if (query.isBlank()) return JSONObject().put("error", "pattern is required").toString()
+        val arr = JSONArray()
+        val textFiles = context.filesDir.walkTopDown()
+            .filter { it.isFile && it.length() < 512_000 && !it.name.endsWith(".apk") }
+        for (f in textFiles) {
+            val text = try { f.readText().take(200_000) } catch (_: Exception) { continue }
+            text.lineSequence().forEachIndexed { idx, line ->
+                if (line.contains(query, ignoreCase = true)) {
+                    arr.put(JSONObject().put("file", f.path.removePrefix(context.filesDir.path))
+                        .put("line", idx + 1).put("text", line.trim().take(140)))
+                }
+            }
+            if (arr.length() > 200) break
+        }
+        return JSONObject().put("pattern", query).put("hits", arr).toString()
     }
 
     // ------------------------------------------------------------- device/misc

@@ -762,17 +762,22 @@ class ChatFragment : Fragment(R.layout.fragment_chat) {
                     wireHistory.forEach { put(JSONObject(it.toString())) }
                 })
                 if (isOpenCode) {
-                    // Since 2026-09-17 the Zen free tier answers non-stream requests
-                    // with 403 FreeTierError ("can only be used from within OpenCode");
-                    // it serves streaming requests only. Verified live on the gateway.
+                    // Zen free tier serves ONLY streaming requests (403 otherwise),
+                    // and since 2026-09-18 it additionally requires the official
+                    // opencode CLI tool NAMES in the body — requests without them get
+                    // 403 FreeTierError ("can only be used from within OpenCode").
+                    // Verified live: the gate checks the tool names only; schemas and
+                    // descriptions are free. zenTools = official 11 + PawWork's own.
                     put("stream", true)
+                    put("max_tokens", 32000)
+                    put("stream_options", JSONObject().put("include_usage", true))
                 }
                 if (!isOpenCode && !(baseUrl.contains("api.deepseek.com") && model == "big-pickle")) {
                     // skip max_tokens for Zen reasoning models (content spills to reasoning),
                     // everywhere else cap output
                     if (!model.startsWith("big-pickle")) put("max_tokens", 4096)
                 }
-                if (supportsTools) put("tools", ToolRegistry.tools)
+                if (supportsTools) put("tools", if (isOpenCode) ToolRegistry.zenTools(requireContext()) else ToolRegistry.tools)
             }
             var resp: String? = null
             // Retry transient failures (DNS flake, mid-stream drop, reset). DNS gets an
@@ -790,7 +795,14 @@ class ChatFragment : Fragment(R.layout.fragment_chat) {
             val msg = try {
                 JSONObject(resp2).getJSONArray("choices").getJSONObject(0).getJSONObject("message")
             } catch (e: Exception) {
-                val errMsg = try { JSONObject(resp2).optString("error_msg", "") } catch (_: Exception) { "" }
+                // Surface the gateway's own words when present: either our error_msg
+                // wrapper or the Zen error shape {"type":"error","error":{...,"message"}}.
+                val errMsg = try {
+                    val j = JSONObject(resp2)
+                    j.optString("error_msg", "").ifEmpty {
+                        j.optJSONObject("error")?.optString("message", "") ?: ""
+                    }
+                } catch (_: Exception) { "" }
                 return if (errMsg.isNotEmpty()) "⚠️ $errMsg" else "⚠️ Bad response: ${resp2.take(200)}"
             }
             val toolCalls = msg.optJSONArray("tool_calls")
@@ -869,11 +881,13 @@ class ChatFragment : Fragment(R.layout.fragment_chat) {
         // What the OpenCode CLI sends so the Zen free tier accepts us:
         // 1. x-opencode-session — REQUIRED since 2026-09-05 (400 MissingSessionID without it)
         // 2. opencode/* User-Agent + x-opencode-client: cli — anonymous free-pool gateway
+        // 3. x-opencode-request — the CLI's per-turn id shape (msg_ + 12 hex + 14 alnum)
         if (baseUrl.contains("opencode.ai")) {
             conn.setRequestProperty("x-opencode-session", openCodeSessionId())
             conn.setRequestProperty("x-opencode-client", "cli")
             conn.setRequestProperty("x-opencode-project", "global")
-            conn.setRequestProperty("User-Agent", "opencode/1.18.16")
+            conn.setRequestProperty("x-opencode-request", openCodeRequestId())
+            conn.setRequestProperty("User-Agent", "opencode/1.18.31")
         }
         conn.connectTimeout = 20000
         conn.readTimeout = 120000
@@ -969,6 +983,14 @@ class ChatFragment : Fragment(R.layout.fragment_chat) {
         }
         val digest = MessageDigest.getInstance("SHA-256").digest(sid.toByteArray())
         return "ses_" + digest.joinToString("") { "%02x".format(it) }.take(26)
+    }
+
+    // Per-turn request id in the CLI's shape: msg_ + 12 hex + 14 alphanumerics.
+    private fun openCodeRequestId(): String {
+        val hex = UUID.randomUUID().toString().replace("-", "").take(12)
+        val alnum = UUID.randomUUID().toString().replace("-", "")
+            .map { if (it.isDigit()) ('a' + (it - '0')) else it }.joinToString("").take(14)
+        return "msg_$hex$alnum"
     }
 }
 
