@@ -100,6 +100,11 @@ object ToolRegistry {
                 JSONObject().put("type", "object").put("properties",
                     JSONObject().put("path", str("Relative path of the file to delete")))
                     .put("required", JSONArray().put("path"))))
+            put(tool("create_folder",
+                "Create a folder in PawWork's private storage (including parents).",
+                JSONObject().put("type", "object").put("properties",
+                    JSONObject().put("path", str("Relative path of the folder to create, e.g. projects/notes")))
+                    .put("required", JSONArray().put("path"))))
             put(tool("calculate",
                 "Evaluate a math expression safely (numbers, + - * / ^ %, parentheses).",
                 JSONObject().put("type", "object").put("properties",
@@ -189,6 +194,7 @@ object ToolRegistry {
                 "list_files" -> listFiles(context, args.optString("path"))
                 "search_files" -> searchFiles(context, args.optString("query"))
                 "delete_file" -> deleteFile(context, args.optString("path"))
+                "create_folder" -> createFolder(context, args.optString("path"))
                 "calculate" -> JSONObject().put("result", Calculator.eval(args.optString("expression"))).toString()
                 "share_text" -> onMain { shareText(context, args.optString("text")) }
                 "clipboard_copy" -> onMain { clipboardCopy(context, args.optString("text")) }
@@ -413,6 +419,16 @@ object ToolRegistry {
         if (!f.exists()) return JSONObject().put("error", "not found: $rel").toString()
         val deleted = f.delete()
         return JSONObject().put("ok", deleted).put("path", rel).toString()
+    }
+
+    private fun createFolder(context: Context, rel: String): String {
+        if (rel.isBlank()) return JSONObject().put("error", "path is required").toString()
+        // refuse to escape app storage
+        val f = safeFile(context, rel)
+        val ok = f.mkdirs()
+        return JSONObject().put("ok", ok || f.isDirectory)
+            .put("path", rel)
+            .put("error", if (ok || f.isDirectory) "" else "could not create folder").toString()
     }
 
     // ------------------------------------------------------------- device/misc

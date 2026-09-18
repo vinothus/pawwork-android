@@ -57,8 +57,13 @@
             android:hint="Ask me anything..."
             android:background="@drawable/input_bg"
             android:padding="12dp"
+            android:paddingTop="8dp"
+            android:paddingBottom="8dp"
             android:textSize="14sp"
-            android:singleLine="true"
+            android:gravity="top|start"
+            android:minLines="1"
+            android:maxLines="5"
+            android:inputType="textCapSentences|textMultiLine"
             android:imeOptions="actionSend" />
 
         <ImageButton

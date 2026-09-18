@@ -73,7 +73,7 @@ class ChatFragment : Fragment(R.layout.fragment_chat) {
         val attachBtn = view.findViewById<ImageButton>(R.id.attachBtn)
         val micBtn = view.findViewById<ImageButton>(R.id.micBtn)
 
-        adapter = ChatAdapter(messages)
+        adapter = ChatAdapter(messages) { path -> openFileWithAndroid(path) }
         recyclerView.layoutManager = LinearLayoutManager(requireContext()).apply { stackFromEnd = true }
         recyclerView.adapter = adapter
 
@@ -89,6 +89,30 @@ class ChatFragment : Fragment(R.layout.fragment_chat) {
             }
         }
         micBtn.setOnClickListener { toggleMic(input, micBtn) }
+
+        // Chat box grows while you type, shrinks back to one line when you leave it
+        val density = resources.displayMetrics.density
+        input.setOnFocusChangeListener { v, hasFocus ->
+            val targetPx = (if (hasFocus) 112f else 44f) * density
+            android.animation.ValueAnimator.ofFloat(v.height.toFloat(), targetPx).apply {
+                duration = 220
+                interpolator = android.view.animation.DecelerateInterpolator(1.6f)
+                addUpdateListener { a ->
+                    val lp = v.layoutParams
+                    lp.height = (a.animatedValue as Float).toInt()
+                    v.layoutParams = lp
+                }
+                start()
+            }
+        }
+        // hardware Enter still sends; soft-keyboard Enter inserts a newline (multi-line box)
+        input.setOnEditorActionListener { _, _, event ->
+            if (event != null && event.keyCode == android.view.KeyEvent.KEYCODE_ENTER &&
+                event.action == android.view.KeyEvent.ACTION_DOWN) {
+                sendBtn.performClick()
+                true
+            } else false
+        }
 
         // Send button press micro-animation (bounce)
         sendBtn.setOnTouchListener { _, ev ->
@@ -137,6 +161,78 @@ class ChatFragment : Fragment(R.layout.fragment_chat) {
                 saveConfig()
                 addMessage("assistant", "🔧 Tool-calling test armed. Asking Big Pickle to call a tool...")
                 sendMessage("Please use the generate_document tool to create a docx report titled PawWork Android.")
+            }, 5000)
+        }
+        // Deep-start diagnostic: JUST run_code js + python into a report (fast iteration)
+        // adb shell am start -n com.pawwork.android/.MainActivity --es action webview_test
+        if (requireActivity().intent.getStringExtra("action") == "webview_test") {
+            view.postDelayed({
+                lifecycleScope.launch(Dispatchers.IO) {
+                    val f = java.io.File(requireContext().filesDir, "webview_report.txt")
+                    f.writeText("WEBVIEW TEST\n")
+                    fun step(name: String, result: String) {
+                        f.appendText("$name → ${result.take(500)}\n")
+                        android.util.Log.i("PawWorkLab", "$name → ${result.take(300)}")
+                    }
+                    step("js_6x7", ToolRegistry.execute(requireContext(), "run_code",
+                        """{"lang":"javascript","code":"6*7"}"""))
+                    step("js_hello", ToolRegistry.execute(requireContext(), "run_code",
+                        """{"lang":"javascript","code":"'hello from js'.toUpperCase()"}"""))
+                    step("py_6x7", ToolRegistry.execute(requireContext(), "run_code",
+                        """{"lang":"python","code":"print('python says', 6*7)"}"""))
+                    f.appendText("WEBVIEW TEST DONE\n")
+                    view?.post { addMessage("assistant", "✅ webview_test complete, see webview_report.txt") }
+                }
+            }, 6000)
+        }
+        // Deep-start: verify non-WebView features (create_folder, file chips, input autosize)
+        // adb shell am start -n com.pawwork.android/.MainActivity --es action features_test
+        if (requireActivity().intent.getStringExtra("action") == "features_test") {
+            view.postDelayed({
+                lifecycleScope.launch(Dispatchers.IO) {
+                    val ctx = requireContext()
+                    val f = java.io.File(ctx.filesDir, "features_report.txt")
+                    f.writeText("FEATURES TEST\n")
+                    fun step(name: String, result: String) { f.appendText("$name → ${result.take(500)}\n") }
+                    // 1. create_folder
+                    step("create_folder_ok", ToolRegistry.execute(ctx, "create_folder",
+                        """{"path":"projects/notes"}"""))
+                    step("create_folder_dup", ToolRegistry.execute(ctx, "create_folder",
+                        """{"path":"projects/notes"}"""))
+                    step("create_folder_empty", ToolRegistry.execute(ctx, "create_folder",
+                        """{"path":""}"""))
+                    // 2. write_file + file chip (resolveFile + addFile)
+                    val writeResult = ToolRegistry.execute(ctx, "write_file",
+                        """{"path":"projects/notes/hello.txt","content":"Hello from PawWork!"}""")
+                    step("write_file", writeResult)
+                    // simulate what the tool-loop does: parse file/write_file/apk/path → resolveFile → addFile
+                    try {
+                        val jo = org.json.JSONObject(writeResult)
+                        val rel = jo.optString("file").ifEmpty { jo.optString("path") }
+                        if (rel.isNotEmpty()) {
+                            val abs = resolveFile(ctx, rel)
+                            if (abs != null) {
+                                view?.post { addFile(abs) }
+                                step("file_chip_abs", abs)
+                            } else {
+                                step("file_chip_abs", "RESOLVE_FAILED: $rel")
+                            }
+                        } else {
+                            step("file_chip_abs", "NO_FILE_FIELD: ${writeResult.take(200)}")
+                        }
+                    } catch (e: Exception) { step("file_chip_err", e.toString()) }
+                    // 3. list folder
+                    step("list_files", ToolRegistry.execute(ctx, "list_files",
+                        """{"path":"projects/notes"}"""))
+                    // 4. delete file
+                    step("delete_file", ToolRegistry.execute(ctx, "delete_file",
+                        """{"path":"projects/notes/hello.txt"}"""))
+                    // 5. delete folder (now empty)
+                    step("delete_folder", ToolRegistry.execute(ctx, "delete_file",
+                        """{"path":"projects/notes"}"""))
+                    f.appendText("FEATURES TEST DONE\n")
+                    view?.post { addMessage("assistant", "✅ features_test complete") }
+                }
             }, 5000)
         }
         // Deep-start demo: Code & APK Lab
@@ -252,6 +348,7 @@ class ChatFragment : Fragment(R.layout.fragment_chat) {
             sendMessage(text)
             val imm = requireContext().getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
             imm.hideSoftInputFromWindow(input.windowToken, 0)
+            input.clearFocus()   // shrink the box back to one line after sending
         }
 
         // Load saved provider config
@@ -446,6 +543,59 @@ class ChatFragment : Fragment(R.layout.fragment_chat) {
         adapter.markInserted(messages.size - 1)
         view?.findViewById<RecyclerView>(R.id.chatRecycler)?.scrollToPosition(messages.size - 1)
         persistChat()
+    }
+
+    /** Show a tappable file chip; the user taps it and Android opens the file with a viewer.
+ *  The message text IS the absolute path (persists + survives reload), the adapter renders
+ *  the pretty "📄 name — tap to open" label. */
+    fun addFile(path: String) {
+        addMessage("file", path)
+    }
+
+    /** Resolve a tool-result file reference to an absolute path that exists. */
+    private fun resolveFile(context: android.content.Context, ref: String): String? {
+        if (ref.startsWith("/") && java.io.File(ref).exists()) return ref
+        val candidates = listOf(
+            java.io.File(context.filesDir, ref),
+            java.io.File(context.filesDir, "documents/$ref"),
+            java.io.File(context.filesDir, "apk/$ref"),
+        )
+        candidates.firstOrNull { it.exists() }?.let { return it.absolutePath }
+        // last resort: search recursively by name (tools return bare filenames)
+        val found = context.filesDir.walkTopDown().filter { it.isFile && it.name == ref }.firstOrNull()
+        return found?.absolutePath
+    }
+
+    /** Open a PawWork-produced file with the Android OS via FileProvider + ACTION_VIEW. */
+    fun openFileWithAndroid(path: String) {
+        try {
+            val f = java.io.File(path)
+            if (!f.exists()) {
+                Toast.makeText(requireContext(), "File not found: $path", Toast.LENGTH_SHORT).show()
+                return
+            }
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                requireContext(), "${requireContext().packageName}.files", f)
+            val mime = android.webkit.MimeTypeMap.getSingleton()
+                .getMimeTypeFromExtension(f.extension.lowercase()) ?: "application/octet-stream"
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, mime)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            try {
+                startActivity(Intent.createChooser(intent, "Open with…"))
+            } catch (_: Exception) {
+                // no viewer for this type — fall back to a share sheet
+                val share = Intent(Intent.ACTION_SEND).apply {
+                    type = mime
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                startActivity(Intent.createChooser(share, "No viewer found — share instead"))
+            }
+        } catch (e: Exception) {
+            Toast.makeText(requireContext(), "Could not open: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
     }
 
     // ---- Animated "working" indicator (bouncing dots) shown while tools run ----
@@ -659,6 +809,18 @@ class ChatFragment : Fragment(R.layout.fragment_chat) {
                     // Show the animated working indicator instead of printing the call
                     view?.post { addWorking("🔧 $name…") }
                     val result = ToolRegistry.execute(requireContext(), name, args).take(4000)
+                    // If the tool produced a file, render a tappable link so the user can open it
+                    if (result.contains("\"file\"") || result.contains("\"apk\"") || result.contains("\"path\"") ||
+                        name == "write_file" || name == "build_apk" || name == "download_apk") {
+                        val fileRef = try {
+                            val j = JSONObject(result)
+                            j.optString("file").ifEmpty { j.optString("apk").ifEmpty { j.optString("path") } }
+                        } catch (_: Exception) { "" }
+                        if (fileRef.isNotEmpty()) {
+                            val abs = resolveFile(requireContext(), fileRef)
+                            if (abs != null) view?.post { addFile(abs) }
+                        }
+                    }
                     wireHistory.add(JSONObject()
                         .put("role", "tool")
                         .put("tool_call_id", id)

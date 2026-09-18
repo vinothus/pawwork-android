@@ -9,8 +9,10 @@ import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import com.pawwork.android.R
 
-class ChatAdapter(private val messages: List<ChatMessage>) :
-    RecyclerView.Adapter<ChatAdapter.VH>() {
+class ChatAdapter(
+    private val messages: List<ChatMessage>,
+    private val onFileClick: ((String) -> Unit)? = null,
+) : RecyclerView.Adapter<ChatAdapter.VH>() {
 
     /** Positions that were just inserted, so bind can play the entry animation once. */
     private val freshPositions = mutableSetOf<Int>()
@@ -37,6 +39,7 @@ class ChatAdapter(private val messages: List<ChatMessage>) :
     override fun getItemViewType(pos: Int): Int = when (messages[pos].role) {
         "user" -> TYPE_USER
         "working" -> TYPE_WORKING
+        "file" -> TYPE_FILE
         else -> TYPE_ASSISTANT
     }
 
@@ -44,13 +47,28 @@ class ChatAdapter(private val messages: List<ChatMessage>) :
         val layout = when (viewType) {
             TYPE_USER -> R.layout.item_chat_user
             TYPE_WORKING -> R.layout.item_chat_working
+            TYPE_FILE -> R.layout.item_chat_file
             else -> R.layout.item_chat_assistant
         }
         return VH(LayoutInflater.from(parent.context).inflate(layout, parent, false), viewType)
     }
 
     override fun onBindViewHolder(holder: VH, pos: Int) {
-        holder.text.text = messages[pos].text
+        val msg = messages[pos]
+        if (holder.viewType == TYPE_FILE) {
+            // text IS the absolute path — render a pretty label but remember the path
+            val path = msg.text
+            val name = path.substringAfterLast('/')
+            holder.text.text = if (java.io.File(path).exists()) "📄 $name — tap to open"
+            else "❓ $name (missing)"
+            // clicking a file row opens it with the Android system viewer
+            holder.itemView.setOnClickListener {
+                onFileClick?.invoke(messages[pos].text)
+            }
+            holder.itemView.alpha = 0.92f
+        } else {
+            holder.text.text = msg.text
+        }
         if (holder.viewType == TYPE_WORKING) holder.startDots()
         entryAnimation(holder, pos)
     }
@@ -96,5 +114,6 @@ class ChatAdapter(private val messages: List<ChatMessage>) :
         private const val TYPE_USER = 0
         private const val TYPE_ASSISTANT = 1
         private const val TYPE_WORKING = 2
+        private const val TYPE_FILE = 3
     }
 }

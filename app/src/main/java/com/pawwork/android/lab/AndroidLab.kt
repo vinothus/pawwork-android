@@ -46,6 +46,8 @@ object AndroidLab {
     // ---------------------------------------------------------------- WebView
     @Volatile private var webView: WebView? = null
     @Volatile private var pyodideLoaded = false
+    @Volatile private var pageReady = false
+    @Volatile private var pageReadyLatch = CountDownLatch(1)
     private val bridge = Bridge()
 
     class Bridge {
@@ -73,15 +75,47 @@ object AndroidLab {
             wv.settings.javaScriptEnabled = true
             wv.settings.allowFileAccess = true
             wv.webViewClient = object : WebViewClient() {
-                override fun shouldInterceptRequest(view: WebView, url: String) = loader.shouldInterceptRequest(Uri.parse(url))
+                override fun shouldInterceptRequest(view: WebView, url: String): android.webkit.WebResourceResponse? {
+                    val resp = loader.shouldInterceptRequest(Uri.parse(url))
+                    android.util.Log.i("PawWorkLab", "intercept $url -> ${resp?.mimeType ?: "MISS"}")
+                    return resp
+                }
+                @Deprecated("Deprecated in Java")
+                override fun onReceivedError(view: WebView, errorCode: Int, description: String, failingUrl: String) {
+                    android.util.Log.w("PawWorkLab", "page error $errorCode $description $failingUrl")
+                }
+                override fun onPageFinished(view: WebView, url: String) {
+                    android.util.Log.i("PawWorkLab", "page finished $url")
+                    pageReady = true
+                    pageReadyLatch.countDown()
+                }
+                // Renderer crashes (common on slow emulators) must NOT kill the whole app.
+                // Marking it handled keeps PawWork alive; the next run_code call recreates the WebView.
+                override fun onRenderProcessGone(view: WebView, detail: android.webkit.RenderProcessGoneDetail): Boolean {
+                    resetWebView("renderer gone")
+                    return true
+                }
             }
             wv.addJavascriptInterface(bridge, "AndroidBridge")
-            wv.loadUrl("about:blank")
             webView = wv
         }
         // wait until the main thread has actually created it
         var waited = 0
         while (webView == null && waited < 5000) { Thread.sleep(50); waited += 50 }
+    }
+
+    /**
+     * Load a real page so the JS interface gets injected (about:blank never injects it on
+     * modern WebView). Safe to call repeatedly — only the first call per page navigates.
+     */
+    private fun loadPage(page: String): Boolean {
+        if (pageReady || pyodidePageLoaded) return true
+        pageReady = false
+        pageReadyLatch = CountDownLatch(1)
+        onMain { webView?.loadUrl("https://appassets.androidplatform.net/assets/$page") }
+        val ok = pageReadyLatch.await(180, TimeUnit.SECONDS)
+        if (!ok) android.util.Log.w("PawWorkLab", "page not ready after 180s: $page")
+        return ok && pageReady
     }
 
     private fun onMain(block: () -> Unit) {
@@ -90,17 +124,38 @@ object AndroidLab {
 
     fun runJavaScript(context: Context, code: String): String {
         ensureWebView(context)
-        val latch = CountDownLatch(1)
-        bridge.pendingResult = ""
-        bridge.setResultLatch(latch)   // set BEFORE evaluating to avoid a race
-        onMain {
-            webView?.evaluateJavascript(
-                "try { AndroidBridge.result('ok|' + JSON.stringify(eval(${JSONObject.quote(code)}))); } catch(e) { AndroidBridge.result('err|' + e); }"
-            ) { }
+        if (!loadPage("blank.html"))
+            return pythonResultJson(false, "WebView page did not finish loading", "", "")
+        // evaluate with a couple of retries (the interface may lag the page on slow devices)
+        var last = ""
+        for (attempt in 1..3) {
+            val latch = CountDownLatch(1)
+            bridge.pendingResult = ""
+            bridge.setResultLatch(latch)   // set BEFORE evaluating to avoid a race
+            val wvSnapshot = webView
+            onMain {
+                wvSnapshot?.evaluateJavascript(
+                    "try { AndroidBridge.result('ok|' + JSON.stringify(eval(${JSONObject.quote(code)}))); } catch(e) { AndroidBridge.result('err|' + e); }"
+                ) { }
+            }
+            if (latch.await(30, TimeUnit.SECONDS)) {
+                val r = bridge.pendingResult
+                if (r.isNotEmpty()) return parseRunResult(r, code)
+            }
+            last = pythonResultJson(false, "javascript timed out", "", "")
         }
-        latch.await(25, TimeUnit.SECONDS)
-        val result = bridge.pendingResult
-        return if (result.isEmpty()) "error: no result from WebView (page not ready)" else result.take(2000)
+        return last
+    }
+
+    /** Drop the current WebView so the next call builds a fresh one (post-crash recovery). */
+    private fun resetWebView(reason: String) {
+        val wv = webView
+        webView = null
+        pageReady = false
+        pyodideLoaded = false
+        pyodidePageLoaded = false
+        onMain { wv?.destroy() }
+        android.util.Log.w("PawWorkLab", "WebView reset: $reason")
     }
 
     @Volatile private var pyodidePageLoaded = false
@@ -119,16 +174,45 @@ object AndroidLab {
                 }
             }
             // Pyodide is ~14 MB of WASM; under emulation this can take minutes
-            if (!ready.await(240, TimeUnit.SECONDS) || !pyodideLoaded)
+            if (!ready.await(420, TimeUnit.SECONDS) || !pyodideLoaded)
                 return "python runtime not ready (pyodide assets load failed or timed out)"
         }
         val latch = CountDownLatch(1)
         bridge.pendingResult = ""
         bridge.setResultLatch(latch)
         onMain { webView?.evaluateJavascript("runPy(${JSONObject.quote(code)});", null) }
-        if (!latch.await(120, TimeUnit.SECONDS)) return "python timed out"
-        return bridge.pendingResult.ifEmpty { "error: no result from python" }.take(4000)
+        if (!latch.await(240, TimeUnit.SECONDS)) return pythonResultJson(false, "python timed out", "", "")
+        return parseRunResult(bridge.pendingResult, code)
     }
+
+    /**
+     * Convert the JS bridge's "ok|<stdout>\n(result: X)" / "err|<stderr>" payload into a
+     * structured JSON result so the model can actually see and evaluate the program output.
+     */
+    private fun parseRunResult(raw: String, code: String): String {
+        if (raw.isEmpty()) return pythonResultJson(false, "no result from code runner", "", "")
+        val sep = raw.indexOf('|')
+        if (sep < 0) return pythonResultJson(false, raw.take(400), "", "")
+        val ok = raw.startsWith("ok")
+        val body = raw.substring(sep + 1)
+        // split trailing "(result: ...)" line if present
+        var stdout = body
+        var result = ""
+        val m = Regex("(?s)^(.*)\\n\\(result: (.+)\\)$").find(body.trimEnd())
+        if (m != null) {
+            stdout = m.groupValues[1]
+            result = m.groupValues[2]
+        }
+        return pythonResultJson(ok, "", stdout, result)
+    }
+
+    private fun pythonResultJson(ok: Boolean, err: String, stdout: String, result: String): String =
+        JSONObject()
+            .put("ok", ok)
+            .put("stdout", stdout.take(3000))
+            .put("result", result.take(500))
+            .put("error", err)
+            .toString()
 
     // ---------------------------------------------------------------- APKs
     fun downloadApk(context: Context, args: JSONObject): String {
