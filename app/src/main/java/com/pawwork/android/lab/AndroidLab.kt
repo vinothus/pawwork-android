@@ -442,6 +442,16 @@ object AndroidLab {
             extraAssets["assets/files/${k.trimStart('/')}"] = files.getString(k).toByteArray(Charsets.UTF_8)
             fileCount++
         }
+        // injected media (audio/video) → assets/media/<name> so the built APK's WebView runner
+        // can both list them (Tpl.mediaList) and play them (Tpl.assetRead → blob/stream).
+        val media = args.optJSONObject("media") ?: JSONObject()
+        val mkeys = media.keys()
+        var mediaCount = 0
+        while (mkeys.hasNext()) {
+            val k = mkeys.next()
+            extraAssets["assets/media/$k"] = Base64.decode(media.getString(k).removePrefix("b64:"), Base64.NO_WRAP)
+            mediaCount++
+        }
         var pyodideBytes = 0L
         if (lang == "python") {
             for (name in PYODIDE_ASSETS) {

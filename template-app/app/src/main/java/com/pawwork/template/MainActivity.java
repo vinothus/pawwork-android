@@ -138,6 +138,66 @@ public class MainActivity extends Activity {
             } catch (Exception e) { return err(e.getMessage() == null ? "list failed" : e.getMessage()); }
         }
 
+        /** List all injected media (audio/video) assets the runner can play. */
+        @JavascriptInterface
+        public String mediaList() {
+            try {
+                String[] kids = ctx.getAssets().list("media");
+                JSONArray arr = new JSONArray();
+                if (kids != null) for (String k : kids) {
+                    JSONObject o = new JSONObject().put("name", k);
+                    String lk = k.toLowerCase();
+                    String type = (lk.endsWith(".mp4") || lk.endsWith(".webm") || lk.endsWith(".mkv")) ? "video"
+                        : (lk.endsWith(".mp3") || lk.endsWith(".ogg") || lk.endsWith(".wav") || lk.endsWith(".m4a")) ? "audio"
+                        : "asset";
+                    o.put("type", type);
+                    try { o.put("bytes", ctx.getAssets().openFd("media/" + k).getLength()); } catch (Exception ignored) {}
+                    arr.put(o);
+                }
+                return new JSONObject().put("ok", true).put("media", arr).toString();
+            } catch (Exception e) { return err(e.getMessage() == null ? "media list failed" : e.getMessage()); }
+        }
+
+        /** Read an injected asset (text or base64) — the file pane opens these too. */
+        @JavascriptInterface
+        public String assetRead(String path, boolean asB64) {
+            try {
+                String p = (path == null || path.isEmpty()) ? "" : (path.startsWith("/") ? path.substring(1) : path);
+                InputStream in = ctx.getAssets().open(p);  // throws → caught below
+                byte[] bytes = readAll(in); in.close();
+                boolean text = isText(bytes);
+                if (asB64 || !text)
+                    return new JSONObject().put("ok", true).put("path", p).put("bytes", bytes.length)
+                        .put("encoding", "base64").put("data", Base64.encodeToString(bytes, Base64.NO_WRAP)).toString();
+                return new JSONObject().put("ok", true).put("path", p).put("bytes", bytes.length)
+                    .put("encoding", "utf8").put("data", new String(bytes, "UTF-8")).toString();
+            } catch (Exception e) { return err("asset not found: " + path); }
+        }
+
+        /** Recursive list of ALL injected assets (home.html, pyodide, media, files…). */
+        @JavascriptInterface
+        public String assetList() {
+            try {
+                JSONArray arr = new JSONArray();
+                listAssetsInto(arr, "");
+                return new JSONObject().put("ok", true).put("assets", arr).toString();
+            } catch (Exception e) { return err(e.getMessage() == null ? "asset list failed" : e.getMessage()); }
+        }
+
+        private void listAssetsInto(JSONArray arr, String prefix) throws Exception {
+            String dir = prefix.isEmpty() ? "" : prefix;
+            String[] kids = ctx.getAssets().list(dir);
+            if (kids == null) return;
+            for (String k : kids) {
+                String p = dir.isEmpty() ? k : dir + "/" + k;
+                JSONObject o = new JSONObject().put("path", p);
+                boolean isDir = ctx.getAssets().list(p).length > 0;
+                if (isDir) { listAssetsInto(arr, p); continue; }
+                try { o.put("bytes", ctx.getAssets().openFd(p).getLength()); } catch (Exception ignored) {}
+                arr.put(o);
+            }
+        }
+
         private void listInto(JSONArray arr, File base, File f) throws Exception {
             if (f.isFile()) {
                 arr.put(new JSONObject().put("path", f.getAbsolutePath().substring(base.getAbsolutePath().length()))
