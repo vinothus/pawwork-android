@@ -164,7 +164,10 @@ public class MainActivity extends Activity {
             try {
                 String p = (path == null || path.isEmpty()) ? "" : (path.startsWith("/") ? path.substring(1) : path);
                 InputStream in = ctx.getAssets().open(p);  // throws → caught below
-                byte[] bytes = readAll(in); in.close();
+                ByteArrayOutputStream bos = new ByteArrayOutputStream();
+                byte[] buf = new byte[8192]; int n;
+                while ((n = in.read(buf)) > 0) bos.write(buf, 0, n);
+                byte[] bytes = bos.toByteArray(); in.close();
                 boolean text = isText(bytes);
                 if (asB64 || !text)
                     return new JSONObject().put("ok", true).put("path", p).put("bytes", bytes.length)
@@ -208,7 +211,15 @@ public class MainActivity extends Activity {
             }
         }
 
-        private static byte[] readAll(File f) throws Exception {
+        private static byte[] readAll(InputStream in) throws java.io.IOException {
+        java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+        byte[] buf = new byte[8192]; int n;
+        while ((n = in.read(buf)) > 0) bos.write(buf, 0, n);
+        in.close();
+        return bos.toByteArray();
+    }
+
+    private static byte[] readAll(File f) throws Exception {
             FileInputStream in = new FileInputStream(f);
             try {
                 java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();

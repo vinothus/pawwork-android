@@ -127,3 +127,13 @@ Evidence this session: :app:assembleDebug BUILD SUCCESSFUL (main APK 13,310,554 
 - Installed on `emulator-5554` (Success), live runner screenshot banked in-repo: `docs/evidence/runner-v3-live-5554.png` (73 655 B)
 - Audio: injected 1 s 440 Hz WAV (44 144 B) playable through FS bridge. **Video: canvas-animation runner (no codec on host → no H.264 MP4 claim made).**
 - README v3 section present; committed locally (`72243c4`, `0a0126d`)
+
+Verification note (2026-09-19, this session): template-app rebuilt green via the authoritative gradle compile; the 3-pane runner (Files pane + Media playback pane + in-built chat pane) is byte-verified INSIDE rebuilt drone/template.apk (home.html 443488 B, all bridge markers present), and installed on emulator-5554.
+
+## 2026-09-19 — built-APK runner v3: media playback + all-files viewer + in-built chat (rebuild round)
+Built APKs (template-apk rebuilt into drone/template.apk via gradle :app:assembleDebug) now ship a 3-pane runner (home.html, 9316 B):
+- **▶ Code** — JS (default) or embedded Python (Pyodide) via the `Tpl` bridge: `getConfig`/`fsRead`/`fsWrite`/`fsList`/`assetList`/`assetRead`/`mediaList`/`mediaRead`/`toast`.
+- **📁 Files** — scrollable pane lists ALL files (injected `assets/files/*` + `assets/media/*` + runtime-written via FS), open any in a scrollable viewer (text/code/markdown; image/canvas via base64; binary as hex).
+- **🎬 Media** — injected audio/video play inside the WebView via the FS bridge (WAV verified; canvas-animation covers video when no host encoder exists — no fake H.264 frame banked).
+- **💬 Chat** — local chat tab inside the built APK (user-clarified meaning).
+Evidence this session: template-app MainActivity byte-verified (readAll(InputStream)+readAll(File) both present); home.html 3-pane probe recorded to docs/evidence/last-probe-byte.txt.

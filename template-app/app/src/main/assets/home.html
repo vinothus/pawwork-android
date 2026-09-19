@@ -3,26 +3,52 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PawCode</title>
+<title>PawCode Runner</title>
 <style>
-  body { margin:0; font-family: sans-serif; background:#fff8ef; color:#222; }
+  body { margin:0; font-family:sans-serif; background:#fff8ef; color:#222; }
   header { padding:18px 16px 10px; background:#fffdf8; border-bottom:1px solid #f0e2cf; }
   header h1 { margin:0; font-size:22px; color:#b45309; }
-  header p { margin:6px 0 0; font-size:14px; color:#6b5a44; }
-  .bar { display:flex; gap:10px; padding:10px 16px; }
-  button { border:0; border-radius:8px; padding:10px 14px; font-size:14px; cursor:pointer; }
+  header p  { margin:6px 0 0; font-size:14px; color:#6b5a44; }
+  .tabs { display:flex; gap:6px; padding:10px 16px 0; }
+  .tabs button { border:1px solid #e8d9c2; background:#fff; color:#7c5a35; border-radius:8px 8px 0 0;
+                 padding:8px 14px; font-size:13px; cursor:pointer; }
+  .tabs button.on { background:#b45309; color:#fff; border-color:#b45309; font-weight:bold; }
+  .tab  { display:none; padding:10px 16px 16px; }
+  .tab.on{ display:block; }
+  .bar  { display:flex; gap:10px; padding:10px 0; }
+  button { border:0; border-radius:8px; padding:9px 13px; font-size:13px; cursor:pointer; }
   .run   { background:#b45309; color:#fff; font-weight:bold; }
   .py    { background:#6d28d9; color:#fff; }
-  .toast { background:#eee4d0; color:#5b4a35; }
-  .panes { display:flex; flex-direction:column; gap:10px; padding:0 16px 16px; }
-  .pane { border:1px solid #eee0cc; border-radius:10px; background:#fff; overflow:hidden; }
-  .pane h2 { margin:0; font-size:12px; text-transform:uppercase; letter-spacing:.08em;
-             color:#a97f4f; background:#fbf3e4; padding:6px 10px; }
-  #log { min-height:120px; max-height:240px; overflow:auto; margin:0; padding:10px;
-         font:12px/1.5 ui-monospace, Menlo, Consolas, monospace; color:#334155; white-space:pre-wrap; }
-  #result { min-height:48px; padding:10px; font:13px/1.5 ui-monospace, Menlo, Consolas, monospace;
+  .listPane { display:flex; flex-direction:column; gap:6px; border:1px solid #efe2cf; border-radius:8px;
+              background:#fff; max-height:46vh; overflow:auto; padding:6px; }
+  .fitem { cursor:pointer; padding:6px 8px; border-radius:6px; font:12px/1.4 ui-monospace,Menlo,monospace; }
+  .fitem:hover { background:#fdf3e0; }
+  .fitem b { color:#a16207; }
+  .fitem span { color:#8a7a63; float:right; font-size:11px; }
+  #viewer { display:none; border:1px solid #e6d7bf; border-radius:8px; background:#fff;
+            margin-top:8px; overflow:auto; max-height:52vh; }
+  #viewer pre { margin:0; padding:10px; font:12px/1.5 ui-monospace,Menlo,monospace; color:#1f2937;
+                white-space:pre-wrap; word-break:break-word; }
+  #viewer img, #viewer canvas { display:block; max-width:100%; margin:8px auto; }
+  .back { float:right; background:#eee; color:#555; }
+  #log { min-height:110px; max-height:220px; overflow:auto; margin:0; padding:10px;
+         font:12px/1.5 ui-monospace,Menlo,monospace; color:#334155; white-space:pre-wrap; }
+  #result { min-height:46px; padding:10px; font:13px/1.5 ui-monospace,Menlo,monospace;
             color:#166534; background:#f4fbf4; white-space:pre-wrap; word-break:break-word; }
   .err { color:#b91c1c; background:#fef2f2; }
+  .mediaGrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:8px; }
+  .mcard { border:1px solid #efe2cf; border-radius:8px; background:#fff; padding:8px; text-align:center; }
+  .mcard button { background:#b45309; color:#fff; margin-top:6px; }
+  #player { display:none; margin-top:10px; border:1px solid #e6d7bf; border-radius:8px; background:#000; }
+  #chatbox { display:flex; flex-direction:column; gap:8px; height:56vh; }
+  #chatlog { flex:1; overflow:auto; border:1px solid #efe2cf; border-radius:8px; background:#fff;
+             padding:8px; font:13px/1.5 sans-serif; }
+  .msg { margin:2px 0; padding:6px 8px; border-radius:8px; max-width:80%; white-space:pre-wrap; }
+  .me { background:#b45309; color:#fff; align-self:flex-end; }
+  .them { background:#f3e8d8; color:#4b3825; align-self:flex-start; }
+  #chatbox input { flex:0 0 auto; padding:9px 10px; border:1px solid #e2d2ba; border-radius:8px; font-size:14px; }
+  #chatbox .row { display:flex; gap:6px; }
+  #chatbox .row button { background:#b45309; color:#fff; }
   #code { display:none; }
 </style>
 </head>
@@ -31,131 +57,158 @@
   <h1 id="label">PawCode App</h1>
   <p id="message">Built by PawWork build_apk</p>
 </header>
-<div class="bar">
-  <button class="run" id="runBtn" onclick="runOne()">▶ Run code</button>
-  <button class="py" id="pyBtn" style="display:none" onclick="runOne()">🐍 Run Python</button>
-  <button class="toast" onclick="try { Tpl.toast(document.getElementById('message').textContent); } catch(e){}">Made with PawWork 🐾</button>
+<div class="tabs">
+  <button id="tabCode" class="on" onclick="showTab('code')">▶ Code</button>
+  <button id="tabFiles" onclick="showTab('files')">📁 Files</button>
+  <button id="tabMedia" onclick="showTab('media')">🎵 Media</button>
+  <button id="tabChat" onclick="showTab('chat'); bootChat();">💬 Chat</button>
 </div>
-<div class="panes">
-  <div class="pane"><h2>Output</h2><pre id="log"></pre></div>
-  <div class="pane"><h2>Result</h2><pre id="result"></pre></div>
+
+<div id="paneCode" class="tab on">
+  <div class="bar">
+    <button class="run" onclick="runOne()">▶ Run code</button>
+    <button class="py" id="pyBtn" style="display:none" onclick="runOne()">🐍 Run Python</button>
+    <button class="toast" onclick="try { Tpl.toast(document.getElementById('message').textContent); } catch(e){}">Made with PawWork 🐾</button>
+  </div>
+  <pre id="log"></pre>
+  <pre id="result"></pre>
+</div>
+
+<div id="paneFiles" class="tab">
+  <div class="bar">
+    <button class="run" onclick="refreshFiles()">⟳ Refresh all files</button>
+    <button class="back" onclick="backViewer()" style="display:none">← back</button>
+  </div>
+  <p style="font-size:12px;color:#8a7a63;">All files — injected assets + runtime-written. Click any to open.</p>
+  <div class="listPane" id="fileList"></div>
+  <div id="viewer"><pre id="viewerBody"></pre></div>
+  <div id="viewTarget"></div>
+</div>
+
+<div id="paneMedia" class="tab">
+  <p style="font-size:12px;color:#8a7a63;">Audio &amp; video injected into this APK. Click to play.</p>
+  <div class="mediaGrid" id="mediaGrid"></div>
+  <video id="player" controls playsinline></video>
+</div>
+
+<div id="paneChat" class="tab">
+  <div id="chatbox">
+    <div id="chatlog"></div>
+    <div class="row">
+      <input id="chatInput" placeholder="Chat with this app…" style="flex:1">
+      <button onclick="sendChat()">Send</button>
+    </div>
+  </div>
 </div>
 <pre id="code"></pre>
 
 <script>
 var CFG = null;
-var pyodide = null;
-var canvasCtx = null;
+var t0 = 0;
 
 function $(id) { return document.getElementById(id); }
-
 function logLine(s) {
   var pre = $('log');
-  pre.textContent += (pre.textContent.length && !pre.textContent.endsWith('\n') ? '\n' : '') + String(s);
+  pre.textContent += (pre.textContent.length ? '\n' : '') + s;
   pre.scrollTop = pre.scrollHeight;
 }
 function showResult(s, isErr) {
   var r = $('result');
-  r.textContent = String(s);
+  r.textContent = s;
   r.className = isErr ? 'err' : '';
 }
-
-function makeCanvas() {
-  try {
-    var c = document.createElement('canvas');
-    var ctx = c.getContext('2d');
-    return { canvas: c, ctx: ctx };
-  } catch (e) { return null; }
+function addMsg(who, text) {
+  var c = $('chatlog');
+  var d = document.createElement('div');
+  d.className = 'msg ' + who;
+  d.textContent = text;
+  c.appendChild(d);
+  c.scrollTop = c.scrollHeight;
+}
+function showTab(id) {
+  ['code','files','media','chat'].forEach(function (t) {
+    $('pane' + t[0].toUpperCase() + t.slice(1)).className = (t === id) ? 'tab on' : 'tab';
+    $('tab' + t[0].toUpperCase() + t.slice(1)).className = (t === id) ? 'on' : '';
+  });
+  if (id === 'files') refreshFiles();
+  if (id === 'media') loadMedia();
 }
 
-// ---- JavaScript mode: Paw API for the embedded functionality ----
-var Paw = {
-  log: function (m) { logLine(m); },
-  text: function (m) { showResult(m); },
-  // returns {ok, data, encoding, bytes} — binary files come back base64
-  read: function (p) { return JSON.parse(Tpl.fsRead(String(p))); },
-  // mode 'b64' writes base64 payload; default writes text
-  write: function (p, d, mode) { return JSON.parse(Tpl.fsWrite(String(p), (mode === 'b64' ? 'b64:' : '') + String(d))); },
-  list: function (p) { return JSON.parse(Tpl.fsList(String(p || ''))); },
-  canvas: function () { return makeCanvas(); },
-  toast: function (m) { Tpl.toast(String(m)); }
-};
-
-// ---- Python mode (Pyodide embedded by build_apk when lang=python) ----
-function installPyHooks() {
-  try {
-    pyodide.globals.set('paw_read', function (p) { return Tpl.fsRead(String(p)); });
-    pyodide.globals.set('paw_write', function (p, d) { return Tpl.fsWrite(String(p), String(d)); });
-    pyodide.globals.set('paw_list', function (p) { return Tpl.fsList(String(p || '')); });
-    pyodide.globals.set('js_eval', function (e) { return eval(String(e)); });
-  } catch (err) { logLine('fs hooks failed: ' + err); }
+// ============================================================
+// FILES PANE — ALL files: injected assets + runtime writes
+// ============================================================
+function assetsAll() {
+  var acc = [];
+  (function walk(prefix) {
+    var list;
+    try { list = Tpl.assetList(String(prefix || '')); } catch (e) { return; }
+    var o;
+    try { o = JSON.parse(list); } catch (e) { return; }
+    if (!o || !o.ok) return;
+    (o.assets || []).forEach(function (a) {
+      if (a.type === 'dir') walk(a.path);
+      else acc.push(a);
+    });
+  })('');
+  return acc;
 }
-
-function execPy() {
-  logLine('pyodide ' + (pyodide ? 'ready' : 'loading') + ' — running…');
-  var t0 = Date.now();
+function fsAll() {
   try {
-    pyodide.setStdout({ batched: function (s) { logLine(s); } });
-    pyodide.setStderr({ batched: function (s) { logLine(s); } });
-  } catch (e) { /* old pyodide */ }
-  try {
-    var r = pyodide.runPython($('code').textContent);
-    var extra = (r === undefined || r === null) ? '' : String(r);
-    showResult((extra ? 'python returned: ' + extra : 'done') + '  (' + ((Date.now() - t0) / 1000).toFixed(1) + 's)');
-  } catch (e) { showResult('python error: ' + e, true); }
+    var o = JSON.parse(Tpl.fsList(''));
+    return (o && o.files) ? o.files : [];
+  } catch (e) { return []; }
 }
-
-function loadPyodideRuntime() {
-  logLine('loading embedded python runtime (~15 MB)…');
-  loadPyodide({ indexURL: 'https://appassets.androidplatform.net/assets/pyodide/' }).then(function (p) {
-    pyodide = p;
-    installPyHooks();
-    logLine('python ready — ' + p.version);
-    execPy();
-  }).catch(function (e) {
-    showResult('python runtime failed to load: ' + e, true);
+function refreshFiles() {
+  var box = $('fileList');
+  box.textContent = 'loading…';
+  var all = [];
+  try { all = all.concat(assetsAll().map(function (a) { a.src = 'asset'; return a; })); } catch (e) {}
+  try { all = all.concat(fsAll().map(function (f) { f.src = 'fs'; return f; })); } catch (e) {}
+  box.textContent = '';
+  if (!all.length) { box.textContent = '(no files found)'; return; }
+  all.forEach(function (f) {
+    var d = document.createElement('div');
+    d.className = 'fitem';
+    var name = (f.path || '').split('/').pop() || f.path || '?';
+    d.innerHTML = '<b></b><span></span>';
+    d.querySelector('b').textContent = name;
+    d.querySelector('span').textContent = (f.src === 'asset' ? 'asset' : 'fs') + ' · ' + (f.bytes || 0) + 'B';
+    d.onclick = function () { openFile(f); };
+    box.appendChild(d);
   });
 }
-
-function runJavaScriptOnce() {
-  var t0 = Date.now();
+function openFile(f) {
   try {
-    var fn = new Function('Paw', 'log', 'canvas', $('code').textContent);
-    var out = fn(Paw, logLine, makeCanvas);
-    if (out !== undefined && out !== null) showResult(String(out) + '  (' + ((Date.now() - t0) / 1000).toFixed(1) + 's)');
-    else showResult('done  (' + ((Date.now() - t0) / 1000).toFixed(1) + 's)');
-  } catch (e) {
-    showResult('js error: ' + e, true);
-  }
-}
-
-function runOne() {
-  if (!CFG) return;
-  $('result').textContent = '';
-  $('result').className = '';
-  if (CFG.lang === 'python') {
-    if (typeof loadPyodide === 'undefined') {
-      showResult('python runtime is not embedded in this APK (build with build_apk lang=python)', true);
-      return;
+    var raw, isB64 = false;
+    if (f.src === 'asset') {
+      var o = JSON.parse(Tpl.assetRead(f.path, true));
+      if (!o.ok) throw new Error(o.error || 'asset read failed');
+      isB64 = (o.encoding === 'base64');
+      raw = o.data;
+    } else {
+      var o2 = JSON.parse(Tpl.fsRead(f.path));
+      if (!o2.ok) throw new Error(o2.error || 'read failed');
+      isB64 = (o2.encoding === 'base64');
+      raw = o2.data;
     }
-    if (pyodide) execPy(); else loadPyodideRuntime();
-  } else {
-    runJavaScriptOnce();
-  }
+    var body = $('viewerBody'), v = $('viewer');
+    v.style.display = 'block';
+    $('back').style.display = '';
+    var name = (f.path || '').split('/').pop() || 'file';
+    var lk = name.toLowerCase();
+    // clear canvas holder
+    var holder = $('viewTarget'); holder.textContent = '';
+    if (!isB64) { body.textContent = raw; }          // text/code/markdown
+    else {
+      body.textContent = '[binary/' + (f.bytes || '?') + ' bytes — ' + lk + ']';
+      if (lk.match(/\.(png|jpe?g|gif|webp|bmp|svg)$/)) {
+        var img = document.createElement('img');
+        img.style.maxWidth = '100%';
+        img.style.maxHeight = '52vh';
+        img.src = 'data:image/' + (lk.endsWith('jpg') ? 'jpeg' : lk.replace(/^.*\./, '').split('?')[0].toLowerCase().replace(/^jpe?g$/,'jpeg')) + ';base64,' + raw;
+        $('viewTarget').appendChild(img);
+        body.textContent = name + '  (' + (f.bytes||0) + 'B) — image rendered above';
+      }
+    }
+  } catch (e) { $('viewerBody').textContent = 'open failed: ' + e; $('viewer').style.display = 'block'; }
 }
-
-// ---- init: read config, render, auto-run on launch (and on re-open) ----
-try {
-  CFG = JSON.parse(Tpl.getConfig());
-  $('label').textContent = CFG.label || 'PawCode App';
-  $('message').textContent = CFG.message || '';
-  $('code').textContent = CFG.code || '';
-  if (CFG.lang === 'python') $('pyBtn').style.display = '';
-  logLine('config: lang=' + (CFG.lang || 'js') + ' code=' + (CFG.code || '').length + ' chars');
-  runOne();
-} catch (e) {
-  showResult('config error: ' + e, true);
-}
-</script>
-</body>
-</html>
