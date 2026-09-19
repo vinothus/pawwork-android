@@ -212,3 +212,24 @@ function openFile(f) {
     }
   } catch (e) { $('viewerBody').textContent = 'open failed: ' + e; $('viewer').style.display = 'block'; }
 }
+    function mediaWall() {
+        try {
+            var ml = (typeof Android !== "undefined" && Android.mediaList) ? Android.mediaList() : "";
+            try { var x = JSON.parse(ml||"null"); if (x && x.ok && x.media) {
+                var items = x.media.map(function(m){ return "<option value=\""+ (m.dataB64||"") +"\">"+ (m.name||m.path||"media") +"</option>"; }).join("");
+                var sel = document.getElementById("mediaSel"); if (sel) sel.innerHTML = items;
+            } } catch(e){}
+            var a = document.getElementById("audioEl");
+            if (a && (typeof Android !== "undefined") && Android.assetRead && Android.mediaRead) {
+                a.src = Android.mediaRead ? "data:audio/mpeg;base64," + Android.mediaRead("media/demo.mp3", true) : "";
+            }
+        } catch(e){}
+    }
+    function mediaPick() {
+        var sel = document.getElementById("mediaSel"); var a = document.getElementById("audioEl");
+        if (sel && a && sel.value) a.src = "data:audio/mpeg;base64," + sel.value;
+    }
+    var mediaUI = '<p class="paneHead">media</p>'
+        + '<select id="mediaSel" onchange="mediaPick()"></select>'
+        + '<audio id="audioEl" controls style="width:100%"></audio>'
+        + '<button onclick="mediaWall()">load media</button>';

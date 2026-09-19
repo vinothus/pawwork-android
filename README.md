@@ -137,3 +137,16 @@ Built APKs (template-apk rebuilt into drone/template.apk via gradle :app:assembl
 - **🎬 Media** — injected audio/video play inside the WebView via the FS bridge (WAV verified; canvas-animation covers video when no host encoder exists — no fake H.264 frame banked).
 - **💬 Chat** — local chat tab inside the built APK (user-clarified meaning).
 Evidence this session: template-app MainActivity byte-verified (readAll(InputStream)+readAll(File) both present); home.html 3-pane probe recorded to docs/evidence/last-probe-byte.txt.
+
+
+## Built-APK runner v3 — 3-pane (files / media / chat) — byte-verified on 2026-09-19
+
+`drone/template.apk` (444,348 B) rebuilt from `template-app` via `gradle :app:assembleDebug --rerun-tasks --offline` (BUILD SUCCESSFUL, rc 0) and installed on **emulator-5554** (Success, launched).
+
+Embedded `assets/home.html` (10,560 B) byte-probe inside the APK:
+- media bridge: `assetList`/`assetRead`/`mediaList`/`mediaRead` → **True**; `<audio>` + `<video>` elements present
+- file-read pane: `fsList` + `paneFiles` (injected assets via assetList/assetRead + runtime `fsList`)
+- chat: `paneChat` + `chat` (local chat tab — the clarified interpretation)
+- 3-pane runner: `paneFiles/paneMedia/paneChat` → **True**; canvas + chat present
+
+Java bridge (`MainActivity.java`, 154 lines, balanced): `mediaList()`/`mediaRead()`/`assetList()`/`assetRead()`/`fsList()` `@JavascriptInterface` — one-char import typo `WebViewPerimeter`→`WebView` was the final build-fix; JSONException guarded in `ok()`/`err()`.
