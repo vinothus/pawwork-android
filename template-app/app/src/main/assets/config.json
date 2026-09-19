@@ -1,1 +1,1 @@
-{"label":"PawCode App","message":"Hello from PawWork build_apk!","code":"template"}
+{"label":"PawCode App","message":"Hello from PawWork build_apk!","lang":"js","code":"Paw.log('embedded JavaScript is running');\nvar w = Paw.write('hello.txt', 'This file was written by the built app on this device!');\nPaw.log('wrote: ' + JSON.stringify(w));\nPaw.log('files: ' + JSON.stringify(Paw.list('')));\n'Done — tap the button to re-run.'"}

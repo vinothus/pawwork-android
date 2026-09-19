@@ -12,10 +12,21 @@ function initPyodide() {
   if (pyodide) { AndroidBridge.ready('ok'); return; }
   loadPyodide({ indexURL: '/assets/pyodide/' }).then(function (p) {
     pyodide = p;
+    installFsHooks();
     AndroidBridge.ready('ok');
   }).catch(function (e) {
     AndroidBridge.ready('err:' + e);
   });
+}
+// Expose REAL PawWork storage to Python: paw_read(path) / paw_write(path, data) /
+// paw_list(path) return JSON strings; binary files come back base64 (encoding field).
+function installFsHooks() {
+  try {
+    pyodide.globals.set('paw_read', function (path) { return AndroidBridge.fsRead(String(path)); });
+    pyodide.globals.set('paw_write', function (path, data) { return AndroidBridge.fsWrite(String(path), String(data)); });
+    pyodide.globals.set('paw_list', function (path) { return AndroidBridge.fsList(String(path || '')); });
+    pyodide.globals.set('js_eval', function (expr) { return eval(String(expr)); });
+  } catch (e) { console.log('fs hooks failed', e); }
 }
 function runPy(code) {
   if (!pyodide) { AndroidBridge.result('err|pyodide not loaded'); return; }
@@ -30,6 +41,8 @@ function runPy(code) {
     AndroidBridge.result('ok|' + buf + extra);
   } catch (e) {
     AndroidBridge.result('err|' + buf + e);
+  } finally {
+    installFsHooks(); // re-install in case user code clobbered the globals
   }
 }
 </script>

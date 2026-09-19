@@ -24,9 +24,13 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.pawwork.android.R
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
@@ -39,6 +43,16 @@ import java.security.MessageDigest
 import java.util.Base64
 import java.util.UUID
 
+/**
+ * App-scoped coroutine scope for the agent loop. Unlike `viewLifecycleOwner.lifecycleScope`,
+ * this survives fragment view teardown (rotation, tab switch, backgrounding): a long
+ * background tool call (image calculation, file writes) keeps running and the model
+ * waits for its result instead of the loop dying mid-tool.
+ */
+object AppScope {
+    val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+}
+
 class ChatFragment : Fragment(R.layout.fragment_chat) {
 
     private val messages = mutableListOf<ChatMessage>()
@@ -46,6 +60,14 @@ class ChatFragment : Fragment(R.layout.fragment_chat) {
     private var baseUrl = "https://api.deepseek.com"
     private var apiKey = ""
     private var model = "deepseek-chat"
+
+    // App-lifetime context, captured when the view is created; safe to use from the
+    // AppScope agent loop even after this fragment's view is torn down.
+    private var appCtx: android.content.Context? = null
+
+    // Incremented per sendMessage; a running agent loop checks it at every turn boundary
+    // and stops as soon as the user fired a newer message (no orphan background loops).
+    private var loopGeneration = 0
 
     // Attached image as base64 JPEG (OpenAI vision format), sent with the next user message
     private var imageB64: String? = null
@@ -66,6 +88,7 @@ class ChatFragment : Fragment(R.layout.fragment_chat) {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        appCtx = requireContext().applicationContext
         val recyclerView = view.findViewById<RecyclerView>(R.id.chatRecycler)
         val input = view.findViewById<EditText>(R.id.chatInput)
         val sendBtn = view.findViewById<ImageButton>(R.id.sendBtn)
@@ -254,14 +277,28 @@ class ChatFragment : Fragment(R.layout.fragment_chat) {
                         """{"lang":"javascript","code":"6*7"}"""))
                     show("run_code[python]", ToolRegistry.execute(requireContext(), "run_code",
                         """{"lang":"python","code":"import sys\nprint('python', sys.version.split()[0])\nprint('sum', sum(range(11)))"}"""))
+                    // Python → REAL PawWork storage bridge (the model can read_file the result after)
+                    show("run_code[python,fs-write]", ToolRegistry.execute(requireContext(), "run_code",
+                        """{"lang":"python","timeout_seconds":120,"code":"import json, time\nprint('writing via paw_write...')\nw = paw_write('lab/py_out.txt', 'written from python at ' + time.strftime('%H:%M:%S'))\nprint('write result:', json.loads(w).get('ok'))\nr = paw_read('lab/py_out.txt')\nprint('read back:', json.loads(r).get('data'))\n# slow image-ish calc loop — proves long jobs are NOT killed at 30s\nfor i in range(30):\n    pass\nprint('long loop finished')"}"""))
+                    // JS → real PawWork storage bridge
+                    show("run_code[js,fs-write]", ToolRegistry.execute(requireContext(), "run_code",
+                        """{"lang":"javascript","code":"var w = PawFS.write('lab/js_out.txt', 'hello from js ' + Date.now()); PawFS;  /* returns the write result */"}"""))
                     show("call_library[crypto]", ToolRegistry.execute(requireContext(), "call_library",
                         """{"lib":"crypto","fn":"sha256","args":["pawwork"]}"""))
                     show("call_library[sqlite]", ToolRegistry.execute(requireContext(), "call_library",
                         """{"lib":"sqlite","fn":"test"}"""))
                     show("call_library[zlib]", ToolRegistry.execute(requireContext(), "call_library",
                         """{"lib":"zlib","fn":"deflate","args":["pawwork android lab"]}"""))
-                    show("build_apk", ToolRegistry.execute(requireContext(), "build_apk",
-                        """{"label":"My PawCode App","message":"APK built ON the phone by PawWork!","code":"build_apk"}"""))
+                    // build_apk now embeds EXECUTABLE functionality: JS app that writes files and reports
+                    show("build_apk[functional-js]", ToolRegistry.execute(requireContext(), "build_apk",
+                        """{"label":"PawCode Lab Demo","message":"Functionality baked in by PawWork build_apk!",
+                            "lang":"js",
+                            "code":"Paw.log('hello from the built app'); var w = Paw.write('from_app.txt', 'written by the built APK on ' + new Date().toISOString()); Paw.log('write: ' + JSON.stringify(w)); Paw.log('files: ' + JSON.stringify(Paw.list(''))); Paw.text('Embedded app functionality works!')",
+                            "files":{"help.txt":"Embedded data file — build_apk files param"}}"""))
+                    // lang=python: embeds the Pyodide runtime (~15 MB) — usually a one-time demo
+                    show("build_apk[functional-python]", ToolRegistry.execute(requireContext(), "build_apk",
+                        """{"label":"PawCode Py App","message":"Runs real Python on-device!","lang":"python",
+                            "code":"import time\nprint('python inside the built APK', sys.version.split()[0])\npaw_write('py_app.txt', 'python wrote this file')\nprint('wrote py_app.txt')"}"""))
                     show("list_apps", ToolRegistry.execute(requireContext(), "list_apps", "{}"))
                     show("invoke_app[settings]", ToolRegistry.execute(requireContext(), "invoke_app",
                         """{"package":"com.android.settings"}"""))
@@ -275,6 +312,33 @@ class ChatFragment : Fragment(R.layout.fragment_chat) {
                     view?.post { addMessage("assistant", "✅ code_lab demo complete") }
                 }
             }, 8000)
+        }
+        // Deep-start: background / long-run robustness — long python + JS jobs with the
+        // running-seconds ticker and file bridges (proves no 30s/240s kill + LLM waiting).
+        // adb shell am start -n com.pawwork.android/.MainActivity --es action long_test
+        if (requireActivity().intent.getStringExtra("action") == "long_test") {
+            view.postDelayed({
+                addMessage("assistant", "⏱️ Long-run background test — jobs run in the background and the loop waits…")
+                lifecycleScope.launch(Dispatchers.IO) {
+                    val report = java.io.File(requireContext().filesDir, "long_report.txt")
+                    report.writeText("LONG-RUN TEST\n")
+                    fun step(name: String, result: String) {
+                        report.appendText("$name → ${result.take(700)}\n")
+                        view?.post { addMessage("assistant", "🔧 $name\n→ ${result.take(300)}") }
+                    }
+                    val t0 = System.currentTimeMillis()
+                    // ~90 s python CPU loop — the old 30s/240s caps would kill this
+                    step("python[90s-loop]", ToolRegistry.execute(requireContext(), "run_code",
+                        """{"lang":"python","timeout_seconds":300,"code":"import time\nstart = time.time()\nx = 0\nfor i in range(20000000):\n    x += (i * i) & 0xFFFF\nprint('sum', x)\nprint('elapsed', round(time.time() - start, 1), 's')\npaw_write('long/py_result.txt', 'long python job finished: ' + str(x))"}"""))
+                    step("js[image-math]", ToolRegistry.execute(requireContext(), "run_code",
+                        """{"lang":"javascript","timeout_seconds":300,"code":"// pixel-ish math: 512x512 = 262144 iterations\nvar acc = 0;\nfor (var y = 0; y < 512; y++) { for (var x = 0; x < 512; x++) { acc += (x * y + x) & 0xFFFF; } }\nvar w = PawFS.write('long/js_pixels.txt', 'pixel-sum=' + acc);\n({pixel_sum: acc, wrote: w.ok})"""))
+                    step("build_apk[functional]", ToolRegistry.execute(requireContext(), "build_apk",
+                        """{"label":"Long Test App","message":"Background robustness demo","lang":"js",
+                            "code":"Paw.text('background-built app works');"}"""))
+                    report.appendText("TOTAL ${(System.currentTimeMillis() - t0) / 1000}s\nLONG-RUN TEST DONE\n")
+                    view?.post { addMessage("assistant", "✅ long_test complete — see long_report.txt") }
+                }
+            }, 6000)
         }
         // Deep-start: isolated APK build + install test
         // adb shell am start -n com.pawwork.android/.MainActivity --es action install_test
@@ -484,7 +548,10 @@ class ChatFragment : Fragment(R.layout.fragment_chat) {
 
     private fun historyFile(name: String) = java.io.File(requireContext().filesDir, name)
 
+    private fun historyFile(ctx: android.content.Context, name: String) = java.io.File(ctx.filesDir, name)
+
     private fun persistChat() {
+        val ctx = appCtx ?: return
         val msgSnapshot = synchronized(messages) { messages.toList() }
         val wireSnapshot = synchronized(wireHistory) { wireHistory.map { JSONObject(it.toString()) } }
         ioExec.execute {
@@ -494,10 +561,10 @@ class ChatFragment : Fragment(R.layout.fragment_chat) {
                 msgSnapshot.filter { it.role != "working" }.takeLast(400).forEach {
                     arr.put(JSONObject().put("role", it.role).put("text", it.text))
                 }
-                historyFile("chat_history.json").writeText(arr.toString())
+                historyFile(ctx, "chat_history.json").writeText(arr.toString())
                 val w = JSONArray()
                 wireSnapshot.takeLast(400).forEach { w.put(it) }
-                historyFile("wire_history.json").writeText(w.toString())
+                historyFile(ctx, "wire_history.json").writeText(w.toString())
             } catch (_: Exception) { /* history is best-effort */ }
         }
     }
@@ -550,6 +617,15 @@ class ChatFragment : Fragment(R.layout.fragment_chat) {
  *  the pretty "📄 name — tap to open" label. */
     fun addFile(path: String) {
         addMessage("file", path)
+    }
+
+    /** run_code's timeout_seconds (or a sane default): the wait budget for the background tool. */
+    private fun argsTimeoutSeconds(args: String): Long {
+        val def = com.pawwork.android.lab.AndroidLab.DEFAULT_RUN_TIMEOUT_SECONDS
+        return try {
+            val t = JSONObject(args).optLong("timeout_seconds", def)
+            if (t in 1..86400) t else def
+        } catch (_: Exception) { def }
     }
 
     /** Resolve a tool-result file reference to an absolute path that exists. */
@@ -627,13 +703,17 @@ class ChatFragment : Fragment(R.layout.fragment_chat) {
     }
 
     private fun sendMessage(userText: String) {
-        viewLifecycleOwner.lifecycleScope.launch {
+        // Each send supersedes any running loop; the old one stops at its next turn boundary.
+        val gen = ++loopGeneration
+        AppScope.scope.launch {
             try {
-                val reply = withContext(Dispatchers.IO) { callAi(userText) }
-                removeWorking() // animation ends before the answer lands
-                addMessage("assistant", reply)
+                val reply = callAi(gen, userText)
+                withContext(Dispatchers.Main) {
+                    if (gen != loopGeneration) return@withContext // superseded — newer message owns the UI
+                    removeWorking() // animation ends before the answer lands
+                    addMessage("assistant", reply)
+                }
             } catch (e: Exception) {
-                removeWorking()
                 val msg = when (e) {
                     is java.net.UnknownHostException ->
                         "🌐 Can't reach the AI server — DNS lookup for \"${baseUrl.substringAfter("://").substringBefore("/")}\" failed. Check your internet connection, then resend."
@@ -643,12 +723,18 @@ class ChatFragment : Fragment(R.layout.fragment_chat) {
                         "⏱️ AI server took too long to respond. Check your connection and resend."
                     else -> "⚠️ Error: ${e.message}"
                 }
-                addMessage("assistant", msg)
+                withContext(Dispatchers.Main) {
+                    if (gen != loopGeneration) return@withContext
+                    removeWorking()
+                    addMessage("assistant", msg)
+                }
             } finally {
                 // the image was baked into callAi's wire history; clear the pending attachment
-                if (imageB64 != null) {
-                    imageB64 = null
-                    view?.findViewById<ImageButton>(R.id.attachBtn)?.setImageResource(android.R.drawable.ic_menu_gallery)
+                withContext(Dispatchers.Main) {
+                    if (gen == loopGeneration && imageB64 != null) {
+                        imageB64 = null
+                        view?.findViewById<ImageButton>(R.id.attachBtn)?.setImageResource(android.R.drawable.ic_menu_gallery)
+                    }
                 }
             }
         }
@@ -739,7 +825,9 @@ class ChatFragment : Fragment(R.layout.fragment_chat) {
     private val supportsTools: Boolean
         get() = !baseUrl.contains("10.0.2.2") // Ollama native off; everyone else gets tools
 
-    private fun callAi(userText: String): String {
+    private suspend fun callAi(gen: Int, userText: String): String {
+        val ctx = appCtx ?: runCatching { requireContext().applicationContext }.getOrNull()
+            ?: return "⚠️ App context lost — resend."
         val isOpenCode = baseUrl.contains("opencode.ai")
         // Thinking animation while the model (and tools) work; removed when the reply lands
         view?.post { addWorking("💭 $model is thinking…") }
@@ -756,6 +844,8 @@ class ChatFragment : Fragment(R.layout.fragment_chat) {
         var lastToolCall = ""
         var repeatedToolCalls = 0
         for (turn in 0 until 12) { // raised from 5 to avoid premature tool-loop exits
+            // A newer user message supersedes this loop — stop at the next boundary.
+            if (gen != loopGeneration) return ""
             val body = JSONObject().apply {
                 put("model", model)
                 put("messages", JSONArray().apply {
@@ -777,18 +867,18 @@ class ChatFragment : Fragment(R.layout.fragment_chat) {
                     // everywhere else cap output
                     if (!model.startsWith("big-pickle")) put("max_tokens", 4096)
                 }
-                if (supportsTools) put("tools", if (isOpenCode) ToolRegistry.zenTools(requireContext()) else ToolRegistry.tools)
+                if (supportsTools) put("tools", if (isOpenCode) ToolRegistry.zenTools(ctx) else ToolRegistry.tools)
             }
             var resp: String? = null
             // Retry transient failures (DNS flake, mid-stream drop, reset). DNS gets an
             // extra attempt since it can fail once then succeed on the retry. Backoff 1.5s→3s.
             for (attempt in 1..3) {
                 try {
-                    resp = postChat(body)
+                    resp = postChat(ctx, body)
                     break
                 } catch (e: java.io.IOException) {
                     if (attempt == 3) throw e
-                    Thread.sleep(if (e is java.net.UnknownHostException) 1500L else 1000L * attempt)
+                    delay(if (e is java.net.UnknownHostException) 1500L else 1000L * attempt)
                 }
             }
             val resp2 = resp ?: return "⚠️ Network error calling $model"
@@ -818,9 +908,33 @@ class ChatFragment : Fragment(R.layout.fragment_chat) {
                     val fn = tc.getJSONObject("function")
                     val name = fn.getString("name")
                     val args = fn.optString("arguments", "{}")
-                    // Show the animated working indicator instead of printing the call
+                    // Show the animated working indicator instead of printing the call.
+                    // The tool runs on the app-scoped background executor: heavy Python/JS
+                    // jobs (image calculation, file writes) keep running for minutes while
+                    // the model waits, and the label ticks "running Ns" so it stays honest.
                     view?.post { addWorking("🔧 $name…") }
-                    val result = ToolRegistry.execute(requireContext(), name, args).take(4000)
+                    val budget = argsTimeoutSeconds(args)
+                    val job = ToolExecutor.submit(ctx, name, args)
+                    val awaitMsg = run {
+                        withContext(Dispatchers.IO) {
+                            try {
+                                withTimeoutOrNull((budget + 30) * 1000L) {
+                                    while (!job.done) {
+                                        withContext(Dispatchers.Main) {
+                                            updateWorking("🔧 $name… (${job.elapsedSeconds()}s)")
+                                        }
+                                        delay(2000)
+                                    }
+                                    job.result
+                                } ?: JSONObject().put("ok", false)
+                                    .put("error", "background tool exceeded ${budget + 30}s budget").toString()
+                            } catch (e: kotlinx.coroutines.CancellationException) {
+                                job.cancel()
+                                JSONObject().put("ok", false).put("error", "tool cancelled").toString()
+                            }
+                        }
+                    }
+                    val result = awaitMsg.take(4000)
                     // If the tool produced a file, render a tappable link so the user can open it
                     if (result.contains("\"file\"") || result.contains("\"apk\"") || result.contains("\"path\"") ||
                         name == "write_file" || name == "build_apk" || name == "download_apk") {
@@ -829,7 +943,7 @@ class ChatFragment : Fragment(R.layout.fragment_chat) {
                             j.optString("file").ifEmpty { j.optString("apk").ifEmpty { j.optString("path") } }
                         } catch (_: Exception) { "" }
                         if (fileRef.isNotEmpty()) {
-                            val abs = resolveFile(requireContext(), fileRef)
+                            val abs = resolveFile(ctx, fileRef)
                             if (abs != null) view?.post { addFile(abs) }
                         }
                     }
@@ -869,7 +983,7 @@ class ChatFragment : Fragment(R.layout.fragment_chat) {
         return "😅 I used all 12 tool rounds and still hadn't finished — stopped to avoid spinning forever. Last tool tried: ${lastToolCall.take(120)}"
     }
 
-    private fun postChat(body: JSONObject): String? {
+    private fun postChat(ctx: android.content.Context, body: JSONObject): String? {
         val url = URL("${baseUrl.trimEnd('/')}/chat/completions")
         val conn = url.openConnection() as HttpURLConnection
         conn.requestMethod = "POST"
@@ -883,14 +997,16 @@ class ChatFragment : Fragment(R.layout.fragment_chat) {
         // 2. opencode/* User-Agent + x-opencode-client: cli — anonymous free-pool gateway
         // 3. x-opencode-request — the CLI's per-turn id shape (msg_ + 12 hex + 14 alnum)
         if (baseUrl.contains("opencode.ai")) {
-            conn.setRequestProperty("x-opencode-session", openCodeSessionId())
+            conn.setRequestProperty("x-opencode-session", openCodeSessionId(ctx))
             conn.setRequestProperty("x-opencode-client", "cli")
             conn.setRequestProperty("x-opencode-project", "global")
             conn.setRequestProperty("x-opencode-request", openCodeRequestId())
             conn.setRequestProperty("User-Agent", "opencode/1.18.31")
         }
-        conn.connectTimeout = 20000
-        conn.readTimeout = 120000
+        conn.connectTimeout = 30000
+        // Generous per-read timeout: reasoning models and long streaming answers can sit
+        // silent for minutes between chunks — the LLM is allowed to take its time.
+        conn.readTimeout = 300000
         conn.doOutput = true
         try {
             OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
@@ -974,8 +1090,8 @@ class ChatFragment : Fragment(R.layout.fragment_chat) {
     // like its own client mints — `ses_` + 12 hex + 14 alphanumerics — and answers
     // anything else with FreeTierError. Mirror pawwork-linux zen-identity.mjs:
     // hash the stable id into that shape; same id in, same id out.
-    private fun openCodeSessionId(): String {
-        val prefs = requireContext().getSharedPreferences("pawwork", Context.MODE_PRIVATE)
+    private fun openCodeSessionId(ctx: android.content.Context): String {
+        val prefs = ctx.getSharedPreferences("pawwork", android.content.Context.MODE_PRIVATE)
         var sid = prefs.getString("open_code_session", "")
         if (sid.isNullOrEmpty()) {
             sid = "ses_paw_" + UUID.randomUUID().toString().replace("-", "").take(24)

@@ -11,3 +11,9 @@ android {
     }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
 }
+
+dependencies {
+    // WebViewAssetLoader virtual-https origin so embedded Pyodide's fetch() works (same
+    // pattern the PawWork app itself uses); added ~200 KB to every built APK.
+    implementation("androidx.webkit:webkit:1.11.0")
+}

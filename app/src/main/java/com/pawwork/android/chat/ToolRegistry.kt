@@ -145,18 +145,30 @@ object ToolRegistry {
                     JSONObject().put("path", str("Absolute path to the APK")))
                     .put("required", JSONArray().put("path"))))
             put(tool("build_apk",
-                "Build a real installable APK on-device from PawWork's template, sign it (v1) and return its path.",
+                "Build a real installable APK on-device from PawWork's template, sign it (v1) and return its path. " +
+                    "The built app EXECUTES the functionality you give it: lang=js runs `code` as JavaScript with a Paw API " +
+                    "(log/text/read/write/list on the app's own storage); lang=python embeds the Pyodide runtime (self-contained, " +
+                    "~15 MB bigger) and runs `code` as CPython with paw_read/paw_write/paw_list helpers.",
                 obj.put("type", "object").put("properties",
                     JSONObject().put("label", str("App name shown on screen"))
                         .put("message", str("Text the app displays"))
-                        .put("code", str("Optional code/text baked into the app")))
+                        .put("lang", JSONObject().put("type", "string")
+                            .put("enum", JSONArray().put("js").put("python")))
+                        .put("code", str("Functionality source: JavaScript (default) or Python when lang=python"))
+                        .put("files", str("Optional JSON object {path: text} embedded as assets/files/<path> in the built app")))
                     .put("required", JSONArray())))
             put(tool("run_code",
-                "Run code on-device. lang=python (real CPython via Pyodide/WASM) or lang=javascript.",
+                "Run code on-device in the background. lang=python (real CPython via Pyodide/WASM) or lang=javascript. " +
+                    "Python helpers: paw_read(path)/paw_write(path,data)/paw_list(path) read and write REAL PawWork storage " +
+                    "as JSON strings (binary files come back base64 with encoding field). JS helper: window.PawFS " +
+                    "(PawFS.read/write/list). Long jobs run in the background while the model waits; set timeout_seconds " +
+                    "to raise the wait budget (default 1500).",
                 obj.put("type", "object").put("properties",
                     JSONObject().put("lang", JSONObject().put("type", "string")
                         .put("enum", JSONArray().put("python").put("javascript")))
-                        .put("code", str("Program source")))
+                        .put("code", str("Program source"))
+                        .put("timeout_seconds", JSONObject().put("type", "integer")
+                            .put("description", "Max seconds to wait for this run (default 1500 = 25 min)")))
                     .put("required", JSONArray().put("lang").put("code"))))
             put(tool("call_library",
                 "Call an Android system library: crypto (sha256/sha1/md5/uuid), zlib (deflate/inflate), " +
@@ -222,9 +234,12 @@ object ToolRegistry {
                 "download_apk" -> com.pawwork.android.lab.AndroidLab.downloadApk(context, args)
                 "install_apk" -> com.pawwork.android.lab.AndroidLab.installApk(context, args.optString("path"))
                 "build_apk" -> com.pawwork.android.lab.AndroidLab.buildApk(context, args)
-                "run_code" -> when (args.optString("lang")) {
-                    "python" -> com.pawwork.android.lab.AndroidLab.runPython(context, args.optString("code"))
-                    else -> com.pawwork.android.lab.AndroidLab.runJavaScript(context, args.optString("code"))
+                "run_code" -> {
+                    val t = args.optLong("timeout_seconds", com.pawwork.android.lab.AndroidLab.DEFAULT_RUN_TIMEOUT_SECONDS)
+                    when (args.optString("lang")) {
+                        "python" -> com.pawwork.android.lab.AndroidLab.runPython(context, args.optString("code"), t)
+                        else -> com.pawwork.android.lab.AndroidLab.runJavaScript(context, args.optString("code"), t)
+                    }
                 }
                 "call_library" -> com.pawwork.android.lab.AndroidLab.callLibrary(context, args)
                 "invoke_app" -> com.pawwork.android.lab.AndroidLab.invokeApp(context, args)

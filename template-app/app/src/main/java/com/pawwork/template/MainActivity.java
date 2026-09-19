@@ -1,57 +1,168 @@
 package com.pawwork.template;
 
+import android.annotation.SuppressLint;
 import android.app.Activity;
-import android.graphics.Color;
+import android.content.Context;
+import android.net.Uri;
 import android.os.Bundle;
-import android.view.Gravity;
-import android.widget.Button;
-import android.widget.LinearLayout;
-import android.widget.TextView;
+import android.util.Base64;
+import android.webkit.JavascriptInterface;
+import android.webkit.WebResourceResponse;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
 import android.widget.Toast;
+
+import androidx.webkit.WebViewAssetLoader;
+
+import org.json.JSONArray;
 import org.json.JSONObject;
+
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.InputStream;
 
-/** Minimal PawWork-generated app: reads assets/config.json and shows it. */
+/**
+ * PawWork-generated app host (v2, 2026-09-19).
+ *
+ * Runs assets/home.html in a WebView (served through WebViewAssetLoader's virtual
+ * https origin — the same proven pattern PawWork itself uses, so the embedded Pyodide
+ * runtime's fetch() calls work on every WebView). home.html reads assets/config.json
+ * through the {@code Tpl} bridge and EXECUTES the functionality embedded by PawWork's
+ * build_apk tool:
+ *   lang=js     → "code" runs as JavaScript with a Paw API (log/text/read/write/list) plus
+ *                 canvas for offline image math;
+ *   lang=python → "code" runs as real CPython via the Pyodide runtime that build_apk embeds
+ *                 into the APK (self-contained, works fully offline, ~15 MB bigger).
+ * The {@code Tpl} bridge also exposes the app's private file storage to the embedded code.
+ */
 public class MainActivity extends Activity {
+
+    @SuppressLint("SetJavaScriptEnabled")
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
-        String title = "PawCode App", message = "Built by PawWork build_apk", code = "";
-        try {
-            InputStream in = getAssets().open("config.json");
-            byte[] buf = new byte[in.available()]; in.read(buf); in.close();
-            JSONObject cfg = new JSONObject(new String(buf, "UTF-8"));
-            if (cfg.has("label")) title = cfg.getString("label");
-            if (cfg.has("message")) message = cfg.getString("message");
-            if (cfg.has("code")) code = cfg.getString("code");
-        } catch (Exception ignored) {}
+        final WebViewAssetLoader loader = new WebViewAssetLoader.Builder()
+                .addPathHandler("/assets/", new WebViewAssetLoader.AssetsPathHandler(this))
+                .build();
+        WebView wv = new WebView(this);
+        WebSettings s = wv.getSettings();
+        s.setJavaScriptEnabled(true);
+        wv.setWebViewClient(new WebViewClient() {
+            @Override public WebResourceResponse shouldInterceptRequest(WebView view, String url) {
+                return loader.shouldInterceptRequest(Uri.parse(url));
+            }
+        });
+        wv.addJavascriptInterface(new Tpl(this), "Tpl");
+        setContentView(wv);
+        wv.loadUrl("https://appassets.androidplatform.net/assets/home.html");
+    }
 
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setGravity(Gravity.CENTER);
-        root.setPadding(48, 48, 48, 48);
-        root.setBackgroundColor(Color.rgb(255, 248, 239));
+    /** Bridge that the embedded functionality (JS and Python) can call into. */
+    static class Tpl {
+        private final Context ctx;
+        Tpl(Context c) { ctx = c; }
 
-        TextView tv = new TextView(this);
-        tv.setText(title);
-        tv.setTextSize(26);
-        tv.setGravity(Gravity.CENTER);
+        private static String err(String m) {
+            try { return new JSONObject().put("ok", false).put("error", m).toString(); }
+            catch (Exception e) { return "{\"ok\":false,\"error\":\"" + m + "\"}"; }
+        }
 
-        TextView mv = new TextView(this);
-        mv.setText(message);
-        mv.setTextSize(16);
-        mv.setPadding(0, 24, 0, 0);
+        @JavascriptInterface
+        public String getConfig() {
+            try {
+                InputStream in = ctx.getAssets().open("config.json");
+                byte[] buf = new byte[4096];
+                java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+                int n;
+                while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+                in.close();
+                return out.toString("UTF-8");
+            } catch (Exception e) {
+                return "{\"label\":\"PawCode App\",\"message\":\"Built by PawWork\",\"lang\":\"js\",\"code\":\"\"}";
+            }
+        }
 
-        TextView cv = new TextView(this);
-        cv.setText(code.isEmpty() ? "" : "code: " + code);
-        cv.setTextSize(12);
-        cv.setPadding(0, 24, 0, 0);
+        @JavascriptInterface public void toast(String msg) { Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show(); }
+        @JavascriptInterface public void log(String msg) { /* rendered by home.html */ }
 
-        final String toastMsg = message;
-        Button btn = new Button(this);
-        btn.setText("Made with PawWork 🐾");
-        btn.setOnClickListener(v -> Toast.makeText(this, toastMsg, Toast.LENGTH_LONG).show());
+        @JavascriptInterface
+        public String fsRead(String path) {
+            try {
+                File base = ctx.getFilesDir();
+                File f = new File(base, path.startsWith("/") ? path.substring(1) : path);
+                if (!f.getCanonicalPath().startsWith(base.getCanonicalPath()))
+                    return err("outside app storage: " + path);
+                if (!f.exists()) return err("not found: " + path);
+                byte[] bytes = readAll(f);
+                boolean text = isText(bytes);
+                return new JSONObject()
+                    .put("ok", true).put("path", f.getAbsolutePath()).put("bytes", bytes.length)
+                    .put("encoding", text ? "utf8" : "base64")
+                    .put("data", text ? new String(bytes, "UTF-8")
+                        : Base64.encodeToString(bytes, Base64.NO_WRAP))
+                    .toString();
+            } catch (Exception e) { return err(e.getMessage() == null ? "read failed" : e.getMessage()); }
+        }
 
-        root.addView(tv); root.addView(mv); root.addView(cv); root.addView(btn);
-        setContentView(root);
+        @JavascriptInterface
+        public String fsWrite(String path, String data) {
+            try {
+                File base = ctx.getFilesDir();
+                File f = new File(base, path.startsWith("/") ? path.substring(1) : path);
+                if (!f.getCanonicalPath().startsWith(base.getCanonicalPath()))
+                    return err("outside app storage: " + path);
+                byte[] bytes = (data != null && data.startsWith("b64:"))
+                    ? Base64.decode(data.substring(4), Base64.NO_WRAP)
+                    : String.valueOf(data).getBytes("UTF-8");
+                File p = f.getParentFile();
+                if (p != null) p.mkdirs();
+                FileOutputStream fo = new FileOutputStream(f);
+                fo.write(bytes); fo.close();
+                return new JSONObject().put("ok", true).put("path", f.getAbsolutePath())
+                    .put("bytes", bytes.length).toString();
+            } catch (Exception e) { return err(e.getMessage() == null ? "write failed" : e.getMessage()); }
+        }
+
+        @JavascriptInterface
+        public String fsList(String path) {
+            try {
+                File base = ctx.getFilesDir();
+                File start = (path == null || path.isEmpty()) ? base
+                    : new File(base, path.startsWith("/") ? path.substring(1) : path);
+                if (!start.getCanonicalPath().startsWith(base.getCanonicalPath()))
+                    return err("outside app storage: " + path);
+                JSONArray arr = new JSONArray();
+                if (start.exists()) listInto(arr, base, start);
+                return new JSONObject().put("ok", true).put("files", arr).toString();
+            } catch (Exception e) { return err(e.getMessage() == null ? "list failed" : e.getMessage()); }
+        }
+
+        private void listInto(JSONArray arr, File base, File f) throws Exception {
+            if (f.isFile()) {
+                arr.put(new JSONObject().put("path", f.getAbsolutePath().substring(base.getAbsolutePath().length()))
+                    .put("bytes", f.length()));
+            } else if (f.isDirectory()) {
+                File[] kids = f.listFiles();
+                if (kids != null) for (File k : kids) listInto(arr, base, k);
+            }
+        }
+
+        private static byte[] readAll(File f) throws Exception {
+            FileInputStream in = new FileInputStream(f);
+            try {
+                java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+                byte[] buf = new byte[8192];
+                int n;
+                while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+                return out.toByteArray();
+            } finally { in.close(); }
+        }
+
+        private static boolean isText(byte[] bytes) {
+            int n = Math.min(bytes.length, 4096);
+            for (int i = 0; i < n; i++) if (bytes[i] == 0) return false;
+            return true;
+        }
     }
 }

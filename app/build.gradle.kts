@@ -11,8 +11,8 @@ android {
         applicationId = "com.pawwork.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 20260909
-        versionName = "2026.9.9"
+        versionCode = 20260919
+        versionName = "2026.9.19"
     }
 
     buildTypes {
