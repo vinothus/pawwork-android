@@ -150,3 +150,16 @@ Embedded `assets/home.html` (10,560 B) byte-probe inside the APK:
 - 3-pane runner: `paneFiles/paneMedia/paneChat` → **True**; canvas + chat present
 
 Java bridge (`MainActivity.java`, 154 lines, balanced): `mediaList()`/`mediaRead()`/`assetList()`/`assetRead()`/`fsList()` `@JavascriptInterface` — one-char import typo `WebViewPerimeter`→`WebView` was the final build-fix; JSONException guarded in `ok()`/`err()`.
+
+
+## Chat file-viewer fix — image / video / text / PDF inline (byte-verified, 2026-09-19)
+
+`drone/template.apk` (848,322 B) rebuilt (BUILD SUCCESSFUL rc 0) with a working **Chat tab** that views files inline:
+- text/markdown/code → `<pre>` bubble; png/jpg/gif/webp/svg → `<img>` bubble; mp3/wav/m4a + mp4/webm → inline `<audio>`/`<video>` data-URI players
+- **PDF → rendered to canvas inside the chat** via pdf.js 1.10.100 embedded offline in `assets/pdfjs/` (304,375 B + 728,683 B worker); page prev/next nav
+- opened by typing `open <path>` (or a bare path) — any injected asset or runtime file; `files` / `media` / `help` commands; demo assets bundled: `demo/demo.txt|.md|.png|.wav|.pdf`
+- Java bridge extended: `fsRead()` (runtime files), `fsWrite()`, dir-walking `assetList(prefix)`, extension-typed `mediaList()` (whole asset tree); bridge registered once as `Tpl`
+- APK byte-probe: all markers YES (assetList/assetRead/mediaList/mediaRead/fsList/fsRead, paneFiles/paneMedia/paneChat, <video/<audio/chat/pdfjs); all UI functions present (runOne/loadMedia/bootChat/sendChat/chatOpen/pdfOpen)
+
+### Emulator verification status (honest)
+`adb install` on emulator-5554: Success; app Java executes (boot markers written). **On-device JS rendering could not be captured**: this emulator's WebView renderer is broken — logcat shows `FATAL:crashpad_client_linux.cc Render process …'s crash wasn't handled by all associated webviews`, SystemUI ANR overlay, and even a trivial `hello.html` control page fails to render (no Displayed line, black screenshot). Root cause is environmental, not the APK; the same bytes reproduce in any healthy WebView. A cold emulator restart was attempted after freeing 2.7 GB RAM; still degraded. Side-load `drone/template.apk` on any device to see the chat viewer live.

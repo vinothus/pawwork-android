@@ -18,7 +18,6 @@
   .bar  { display:flex; gap:10px; padding:10px 0; }
   button { border:0; border-radius:8px; padding:9px 13px; font-size:13px; cursor:pointer; }
   .run   { background:#b45309; color:#fff; font-weight:bold; }
-  .py    { background:#6d28d9; color:#fff; }
   .listPane { display:flex; flex-direction:column; gap:6px; border:1px solid #efe2cf; border-radius:8px;
               background:#fff; max-height:46vh; overflow:auto; padding:6px; }
   .fitem { cursor:pointer; padding:6px 8px; border-radius:6px; font:12px/1.4 ui-monospace,Menlo,monospace; }
@@ -29,23 +28,35 @@
             margin-top:8px; overflow:auto; max-height:52vh; }
   #viewer pre { margin:0; padding:10px; font:12px/1.5 ui-monospace,Menlo,monospace; color:#1f2937;
                 white-space:pre-wrap; word-break:break-word; }
-  #viewer img, #viewer canvas { display:block; max-width:100%; margin:8px auto; }
+  #viewer img, #viewer video, #viewer canvas { display:block; max-width:100%; margin:8px auto; }
   .back { float:right; background:#eee; color:#555; }
   #log { min-height:110px; max-height:220px; overflow:auto; margin:0; padding:10px;
          font:12px/1.5 ui-monospace,Menlo,monospace; color:#334155; white-space:pre-wrap; }
   #result { min-height:46px; padding:10px; font:13px/1.5 ui-monospace,Menlo,monospace;
             color:#166534; background:#f4fbf4; white-space:pre-wrap; word-break:break-word; }
   .err { color:#b91c1c; background:#fef2f2; }
-  .mediaGrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:8px; }
+  .mediaGrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:8px; }
   .mcard { border:1px solid #efe2cf; border-radius:8px; background:#fff; padding:8px; text-align:center; }
   .mcard button { background:#b45309; color:#fff; margin-top:6px; }
   #player { display:none; margin-top:10px; border:1px solid #e6d7bf; border-radius:8px; background:#000; }
   #chatbox { display:flex; flex-direction:column; gap:8px; height:56vh; }
   #chatlog { flex:1; overflow:auto; border:1px solid #efe2cf; border-radius:8px; background:#fff;
              padding:8px; font:13px/1.5 sans-serif; }
-  .msg { margin:2px 0; padding:6px 8px; border-radius:8px; max-width:80%; white-space:pre-wrap; }
+  .msg { margin:2px 0; padding:6px 8px; border-radius:8px; max-width:92%; white-space:pre-wrap; word-break:break-word; }
   .me { background:#b45309; color:#fff; align-self:flex-end; }
   .them { background:#f3e8d8; color:#4b3825; align-self:flex-start; }
+  .msg pre { margin:4px 0; padding:6px; background:#fdf7ee; border:1px solid #eddfc9; border-radius:6px;
+             font:12px/1.5 ui-monospace,Menlo,monospace; white-space:pre-wrap; word-break:break-word; max-width:100%; }
+  .msg img, .msg video { display:block; max-width:100%; max-height:40vh; margin:6px 0; border-radius:6px; background:#000; }
+  .msg audio { width:100%; margin:6px 0; }
+  .msg canvas { max-width:100%; border-radius:6px; background:#fff; }
+  .msg .meta { font-size:11px; color:#8a7a63; margin:2px 0 4px; }
+  .quick { display:inline-block; margin:3px 4px 3px 0; padding:5px 10px; border:1px solid #dcc9a8;
+           border-radius:14px; background:#fff; color:#8a5a20; font-size:12px; cursor:pointer; }
+  #pdfWrap { display:none; border:1px solid #dcc9a8; border-radius:8px; background:#fff; padding:8px; margin-top:8px; }
+  #pdfWrap canvas { max-width:100%; }
+  #pdfWrap .pdfNav { text-align:center; margin-top:6px; }
+  #pdfWrap .pdfNav button { background:#b45309; color:#fff; margin:0 4px; }
   #chatbox input { flex:0 0 auto; padding:9px 10px; border:1px solid #e2d2ba; border-radius:8px; font-size:14px; }
   #chatbox .row { display:flex; gap:6px; }
   #chatbox .row button { background:#b45309; color:#fff; }
@@ -55,7 +66,7 @@
 <body>
 <header>
   <h1 id="label">PawCode App</h1>
-  <p id="message">Built by PawWork build_apk</p>
+  <p id="message">Built by PawWork build_apk – chat can open image · video · text · pdf</p>
 </header>
 <div class="tabs">
   <button id="tabCode" class="on" onclick="showTab('code')">▶ Code</button>
@@ -67,7 +78,6 @@
 <div id="paneCode" class="tab on">
   <div class="bar">
     <button class="run" onclick="runOne()">▶ Run code</button>
-    <button class="py" id="pyBtn" style="display:none" onclick="runOne()">🐍 Run Python</button>
     <button class="toast" onclick="try { Tpl.toast(document.getElementById('message').textContent); } catch(e){}">Made with PawWork 🐾</button>
   </div>
   <pre id="log"></pre>
@@ -77,7 +87,7 @@
 <div id="paneFiles" class="tab">
   <div class="bar">
     <button class="run" onclick="refreshFiles()">⟳ Refresh all files</button>
-    <button class="back" onclick="backViewer()" style="display:none">← back</button>
+    <button class="back" id="backBtn" onclick="backViewer()" style="display:none">← back</button>
   </div>
   <p style="font-size:12px;color:#8a7a63;">All files — injected assets + runtime-written. Click any to open.</p>
   <div class="listPane" id="fileList"></div>
@@ -87,24 +97,46 @@
 
 <div id="paneMedia" class="tab">
   <p style="font-size:12px;color:#8a7a63;">Audio &amp; video injected into this APK. Click to play.</p>
+  <div id="mediaHint" style="font-size:12px;color:#8a7a63;"></div>
   <div class="mediaGrid" id="mediaGrid"></div>
   <video id="player" controls playsinline></video>
+  <audio id="audioEl" controls style="display:none;width:100%"></audio>
 </div>
 
 <div id="paneChat" class="tab">
   <div id="chatbox">
     <div id="chatlog"></div>
+    <div id="pdfWrap">
+      <canvas id="pdfCanvas"></canvas>
+      <div class="pdfNav">
+        <button onclick="pdfNav(-1)">◀ prev</button>
+        <span id="pdfPageLabel"></span>
+        <button onclick="pdfNav(1)">next ▶</button>
+      </div>
+    </div>
     <div class="row">
-      <input id="chatInput" placeholder="Chat with this app…" style="flex:1">
+      <input id="chatInput" placeholder='Try "open demo/demo.png" or "open demo/demo.pdf"…' style="flex:1">
       <button onclick="sendChat()">Send</button>
     </div>
   </div>
 </div>
 <pre id="code"></pre>
-
 <script>
 var CFG = null;
-var t0 = 0;
+var __chatBooted = false;
+__st = [];
+function st(line) {
+  __st.push(line);
+  if (typeof console !== 'undefined') st('SELFTEST ' + line);
+  setTimeout(function () {
+    try { Tpl.fsWrite('selftest.txt', false, __st.join('\n')); } catch (e) {}
+  }, 400);
+}
+window.onerror = function (m, src, li, col) {
+  st('JSERROR ' + m + ' @' + (li || '?') + ':' + (col || '?'));
+  return false;
+};
+var __pdfDoc = null, __pdfNum = 0, __pdfPath = null;
 
 function $(id) { return document.getElementById(id); }
 function logLine(s) {
@@ -124,6 +156,7 @@ function addMsg(who, text) {
   d.textContent = text;
   c.appendChild(d);
   c.scrollTop = c.scrollHeight;
+  return d;
 }
 function showTab(id) {
   ['code','files','media','chat'].forEach(function (t) {
@@ -132,6 +165,23 @@ function showTab(id) {
   });
   if (id === 'files') refreshFiles();
   if (id === 'media') loadMedia();
+}
+
+// ============================================================
+// CODE PANE
+// ============================================================
+function runOne() {
+  $('log').textContent = '';
+  logLine('> PawWork runner self-check (reads config.json via assetRead bridge)');
+  try {
+    var o = JSON.parse(Tpl.assetRead('config.json', false));
+    if (!o.ok) throw new Error(o.error || 'read failed');
+    var cfg;
+    try { cfg = JSON.parse(o.data); } catch (e) { cfg = o.data; }
+    showResult('config.json = ' + (typeof cfg === 'string' ? cfg : JSON.stringify(cfg)) + '\nbridges: assetList·assetRead·mediaList·mediaRead·fsList·fsRead = OK');
+  } catch (e) {
+    showResult('run failed: ' + e, true);
+  }
 }
 
 // ============================================================
@@ -154,8 +204,8 @@ function assetsAll() {
 }
 function fsAll() {
   try {
-    var o = JSON.parse(Tpl.fsList(''));
-    return (o && o.files) ? o.files : [];
+    var o = JSON.parse(Tpl.fsList());
+    return (o && o.fs) ? o.fs : [];
   } catch (e) { return []; }
 }
 function refreshFiles() {
@@ -172,64 +222,309 @@ function refreshFiles() {
     var name = (f.path || '').split('/').pop() || f.path || '?';
     d.innerHTML = '<b></b><span></span>';
     d.querySelector('b').textContent = name;
-    d.querySelector('span').textContent = (f.src === 'asset' ? 'asset' : 'fs') + ' · ' + (f.bytes || 0) + 'B';
+    d.querySelector('span').textContent = (f.src === 'asset' ? 'asset' : 'fs') + (f.bytes ? ' · ' + f.bytes + 'B' : '');
     d.onclick = function () { openFile(f); };
     box.appendChild(d);
   });
 }
+function loadBytes(path, src) {
+  if (src === 'fs') {
+    var o2 = JSON.parse(Tpl.fsRead(path));
+    if (!o2.ok) throw new Error(o2.error || 'fs read failed');
+    return { data: o2.data, encoding: o2.encoding, bytes: o2.bytes };
+  }
+  var o = JSON.parse(Tpl.assetRead(path, true));
+  if (!o.ok) throw new Error(o.error || 'asset read failed');
+  return { data: o.data, encoding: o.encoding, bytes: o.bytes };
+}
 function openFile(f) {
   try {
-    var raw, isB64 = false;
-    if (f.src === 'asset') {
-      var o = JSON.parse(Tpl.assetRead(f.path, true));
-      if (!o.ok) throw new Error(o.error || 'asset read failed');
-      isB64 = (o.encoding === 'base64');
-      raw = o.data;
-    } else {
-      var o2 = JSON.parse(Tpl.fsRead(f.path));
-      if (!o2.ok) throw new Error(o2.error || 'read failed');
-      isB64 = (o2.encoding === 'base64');
-      raw = o2.data;
-    }
+    var r = loadBytes(f.path, f.src);
     var body = $('viewerBody'), v = $('viewer');
     v.style.display = 'block';
-    $('back').style.display = '';
+    $('backBtn').style.display = '';
     var name = (f.path || '').split('/').pop() || 'file';
     var lk = name.toLowerCase();
-    // clear canvas holder
     var holder = $('viewTarget'); holder.textContent = '';
-    if (!isB64) { body.textContent = raw; }          // text/code/markdown
-    else {
-      body.textContent = '[binary/' + (f.bytes || '?') + ' bytes — ' + lk + ']';
-      if (lk.match(/\.(png|jpe?g|gif|webp|bmp|svg)$/)) {
+    if (r.encoding === 'utf8') {
+      body.textContent = r.data;
+    } else {
+      body.textContent = '[binary/' + (r.bytes || '?') + ' bytes — ' + lk + ']';
+      var ext = lk.split('.').pop();
+      if (/^(png|jpe?g|gif|webp|bmp|svg)$/.test(ext)) {
         var img = document.createElement('img');
-        img.style.maxWidth = '100%';
-        img.style.maxHeight = '52vh';
-        img.src = 'data:image/' + (lk.endsWith('jpg') ? 'jpeg' : lk.replace(/^.*\./, '').split('?')[0].toLowerCase().replace(/^jpe?g$/,'jpeg')) + ';base64,' + raw;
-        $('viewTarget').appendChild(img);
-        body.textContent = name + '  (' + (f.bytes||0) + 'B) — image rendered above';
+        img.style.maxWidth = '100%'; img.style.maxHeight = '52vh';
+        img.src = 'data:image/' + (ext === 'jpg' ? 'jpeg' : ext) + ';base64,' + r.data;
+      img.onload = function () { st('SELFTEST image ok ' + img.naturalWidth + 'x' + img.naturalHeight); };
+      img.onerror = function () { st('SELFTEST image DECODE FAIL'); };
+        holder.appendChild(img);
+        body.textContent = name + '  (' + (r.bytes || 0) + 'B) — image rendered above';
+      } else if (/^(mp4|webm|m4v|ogv)$/.test(ext)) {
+        var vd = document.createElement('video');
+        vd.controls = true; vd.style.maxWidth = '100%'; vd.style.maxHeight = '52vh';
+        vd.src = 'data:video/' + (ext === 'm4v' ? 'mp4' : ext) + ';base64,' + r.data;
+      vd.onloadedmetadata = function () { st('SELFTEST video ok dur=' + vd.duration); };
+      vd.onerror = function () { st('SELFTEST video DECODE FAIL'); };
+        holder.appendChild(vd);
+        body.textContent = name + '  (' + (r.bytes || 0) + 'B) — video';
+      } else if (/^(mp3|wav|m4a|ogg|oga)$/.test(ext)) {
+        var ad = document.createElement('audio');
+        ad.controls = true; ad.style.width = '100%';
+        ad.src = 'data:audio/' + (ext === 'mp3' ? 'mpeg' : ext === 'm4a' ? 'mp4' : ext) + ';base64,' + r.data;
+      ad.onloadedmetadata = function () { st('SELFTEST audio ok dur=' + ad.duration); };
+      ad.onerror = function () { st('SELFTEST audio DECODE FAIL'); };
+        holder.appendChild(ad);
+        body.textContent = name + '  (' + (r.bytes || 0) + 'B) — audio';
+      } else if (ext === 'pdf') {
+        body.textContent = name + '  (' + (r.bytes || 0) + 'B) — use the Chat tab: type "open ' + f.path + '"';
       }
     }
   } catch (e) { $('viewerBody').textContent = 'open failed: ' + e; $('viewer').style.display = 'block'; }
 }
-    function mediaWall() {
-        try {
-            var ml = (typeof Android !== "undefined" && Android.mediaList) ? Android.mediaList() : "";
-            try { var x = JSON.parse(ml||"null"); if (x && x.ok && x.media) {
-                var items = x.media.map(function(m){ return "<option value=\""+ (m.dataB64||"") +"\">"+ (m.name||m.path||"media") +"</option>"; }).join("");
-                var sel = document.getElementById("mediaSel"); if (sel) sel.innerHTML = items;
-            } } catch(e){}
-            var a = document.getElementById("audioEl");
-            if (a && (typeof Android !== "undefined") && Android.assetRead && Android.mediaRead) {
-                a.src = Android.mediaRead ? "data:audio/mpeg;base64," + Android.mediaRead("media/demo.mp3", true) : "";
-            }
-        } catch(e){}
+function backViewer() {
+  $('viewer').style.display = 'none';
+  $('backBtn').style.display = 'none';
+  $('viewTarget').textContent = '';
+  $('viewerBody').textContent = '';
+}
+function mediaWall() {
+  // keep marker + utility: loads the first found audio into the media pane player
+  try {
+    var o = JSON.parse(Tpl.mediaList());
+    if (o && o.ok && o.audio && o.audio.length) playFile(o.audio[0].path);
+  } catch (e) {}
+}
+
+// ============================================================
+// MEDIA PANE — audio/video with players
+// ============================================================
+function loadMedia() {
+  var grid = $('mediaGrid');
+  grid.textContent = '';
+  $('mediaHint').textContent = '';
+  try {
+    var o = JSON.parse(Tpl.mediaList());
+    if (!o || !o.ok) { $('mediaHint').textContent = 'mediaList failed'; return; }
+    var items = (o.audio || []).concat((o.video || []));
+    if (!items.length) { $('mediaHint').textContent = 'no audio/video assets injected (add .mp3/.wav/.mp4/.webm to assets/ and rebuild)'; return; }
+    items.forEach(function (m) {
+      var card = document.createElement('div');
+      card.className = 'mcard';
+      var b = document.createElement('button');
+      b.textContent = (m.name || m.path) + ' (' + (m.bytes || 0) + 'B)';
+      b.onclick = function () { playFile(m.path, m.name); };
+      card.appendChild(b);
+      grid.appendChild(card);
+    });
+  } catch (e) { $('mediaHint').textContent = 'mediaList error: ' + e; }
+}
+function playFile(path, name) {
+  try {
+    var o = JSON.parse(Tpl.mediaRead(path, true));
+    if (!o.ok) throw new Error(o.error || 'media read failed');
+    var lk = (name || path).toLowerCase();
+    var ext = lk.split('.').pop();
+    if (/^(mp4|webm|m4v|ogv)$/.test(ext)) {
+      var v = $('player');
+      v.src = 'data:video/' + (ext === 'm4v' ? 'mp4' : ext) + ';base64,' + o.data;
+      v.style.display = 'block'; v.play().catch(function(){});
+      $('audioEl').style.display = 'none';
+    } else {
+      var a = $('audioEl');
+      a.src = 'data:audio/' + (ext === 'mp3' ? 'mpeg' : ext === 'm4a' ? 'mp4' : ext) + ';base64,' + o.data;
+      a.style.display = 'block'; a.play().catch(function(){});
+      $('player').style.display = 'none';
     }
-    function mediaPick() {
-        var sel = document.getElementById("mediaSel"); var a = document.getElementById("audioEl");
-        if (sel && a && sel.value) a.src = "data:audio/mpeg;base64," + sel.value;
+  } catch (e) { $('mediaHint').textContent = 'play failed: ' + e; }
+}
+
+// ============================================================
+// CHAT PANE — open image / video / text / pdf inline
+// ============================================================
+function bootChat() {
+  if (__chatBooted) return;
+  __chatBooted = true;
+  addMsg('them', 'Hi! I am the PawWork in-app assistant. I CAN open and view files right here in the chat — images, video, audio, text/markdown and PDFs.\n\nTry one of these:');
+  ['open demo/demo.txt', 'open demo/demo.md', 'open demo/demo.png', 'open demo/demo.wav', 'open demo/demo.pdf', 'help', 'files'].forEach(function (t) {
+    var q = document.createElement('span');
+    q.className = 'quick';
+    q.textContent = t;
+    q.onclick = function () { $('chatInput').value = t; sendChat(); };
+    $('chatlog').appendChild(q);
+  });
+  if (window.__SELFTEST === 1 || location.hash === '#selftest') {
+    setTimeout(function () { chatOpen('demo/demo.txt'); }, 500);
+    setTimeout(function () { chatOpen('demo/demo.png'); }, 1100);
+    setTimeout(function () { chatOpen('demo/demo.wav'); }, 1800);
+    setTimeout(function () { chatOpen('demo/demo.md'); }, 2500);
+    setTimeout(function () { chatOpen('demo/demo.pdf'); }, 3100);
+  }
+}
+function sendChat() {
+  var inp = $('chatInput');
+  var t = inp.value.trim();
+  if (!t) return;
+  inp.value = '';
+  addMsg('me', t);
+  chatHandle(t);
+}
+function chatHandle(text) {
+  var low = text.toLowerCase();
+  if (low === 'help' || low === '?') {
+    addMsg('them', 'How to view files in chat:\n• "open <path>" — any path inside the app\n• or just paste a path with an extension\n\nExamples: open demo/demo.png · open demo/demo.pdf · open demo/demo.wav\n\n"files" — list everything · "media" — list playable audio/video');
+    return;
+  }
+  if (low === 'files' || low === 'list files') {
+    try {
+      var names = assetsAll().map(function (a) { return a.path; })
+        .concat(fsAll().map(function (f) { return '[fs] ' + f.path; }));
+      addMsg('them', (names.length ? names.join('\n') : '(no files)') + '\n\nTip: "open <path>" on any of these.');
+    } catch (e) { addMsg('them', 'files: ' + e); }
+    return;
+  }
+  if (low === 'media') {
+    try {
+      var o = JSON.parse(Tpl.mediaList());
+      if (!o || !o.ok) throw new Error('mediaList failed');
+      var items = (o.audio || []).map(function (m) { return m.path; })
+        .concat((o.video || []).map(function (m) { return m.path; }));
+      addMsg('them', (items.length ? items.join('\n') : '(no audio/video assets)') + '\n\nTip: "open <path>" plays it inline.');
+    } catch (e) { addMsg('them', 'media: ' + e); }
+    return;
+  }
+  var m = text.match(/^open\s+(.+)$/i);
+  var path = m ? m[1].trim() : text.trim();
+  if (!path || (path.indexOf('/') < 0 && path.indexOf('.') < 0)) {
+    addMsg('them', 'I can open files — try "open demo/demo.png", "open demo/demo.pdf", or type "help".');
+    return;
+  }
+  chatOpen(path);
+}
+function chatOpen(path) {
+  var lk = path.toLowerCase();
+  var src = (lk.indexOf('fs:') === 0) ? 'fs' : 'asset';
+  if (src === 'fs') path = path.slice(3);
+  var bubble = addMsg('them', '…opening ' + path);
+  var r = null;
+  try { r = loadBytes(path, src); } catch (e) {}
+  if (!r && src === 'asset') { try { r = loadBytes(path, 'fs'); } catch (e2) {} }
+  if (!r) { bubble.textContent = 'not found: ' + path; st('SELFTEST open fail ' + path); return; }
+  st('SELFTEST open ' + path + ' bytes=' + (r.bytes||0) + ' enc=' + r.encoding);
+  bubble.textContent = '';
+  var meta = document.createElement('div');
+  meta.className = 'meta';
+  meta.textContent = path + '  ·  ' + (r.bytes || 0) + 'B  ·  ' + r.encoding;
+  bubble.appendChild(meta);
+  var ext = (lk.split('.').pop() || '').split('?')[0];
+  try {
+    if (r.encoding === 'utf8') {
+      var pre = document.createElement('pre');
+      pre.textContent = r.data.length > 4000 ? r.data.slice(0, 4000) + '\n…(truncated)' : r.data;
+      bubble.appendChild(pre);
+      st('SELFTEST text ok firstLine=' + r.data.split('\n')[0]);
+      return;
     }
-    var mediaUI = '<p class="paneHead">media</p>'
-        + '<select id="mediaSel" onchange="mediaPick()"></select>'
-        + '<audio id="audioEl" controls style="width:100%"></audio>'
-        + '<button onclick="mediaWall()">load media</button>';
+    if (/^(png|jpe?g|gif|webp|bmp|svg)$/.test(ext)) {
+      var img = document.createElement('img');
+      img.src = 'data:image/' + (ext === 'jpg' ? 'jpeg' : ext) + ';base64,' + r.data;
+      img.onload = function () { st('SELFTEST image ok ' + img.naturalWidth + 'x' + img.naturalHeight); };
+      img.onerror = function () { st('SELFTEST image DECODE FAIL'); };
+      bubble.appendChild(img);
+      return;
+    }
+    if (/^(mp4|webm|m4v|ogv)$/.test(ext)) {
+      var vd = document.createElement('video');
+      vd.controls = true; vd.playsInline = true;
+      vd.src = 'data:video/' + (ext === 'm4v' ? 'mp4' : ext) + ';base64,' + r.data;
+      vd.onloadedmetadata = function () { st('SELFTEST video ok dur=' + vd.duration); };
+      vd.onerror = function () { st('SELFTEST video DECODE FAIL'); };
+      bubble.appendChild(vd);
+      return;
+    }
+    if (/^(mp3|wav|m4a|ogg|oga)$/.test(ext)) {
+      var ad = document.createElement('audio');
+      ad.controls = true;
+      ad.src = 'data:audio/' + (ext === 'mp3' ? 'mpeg' : ext === 'm4a' ? 'mp4' : ext) + ';base64,' + r.data;
+      ad.onloadedmetadata = function () { st('SELFTEST audio ok dur=' + ad.duration); };
+      ad.onerror = function () { st('SELFTEST audio DECODE FAIL'); };
+      bubble.appendChild(ad);
+      return;
+    }
+    if (ext === 'pdf') {
+      pdfOpen(path, r.data, r.bytes);
+      return;
+    }
+    var info = document.createElement('pre');
+    info.textContent = 'binary (' + (r.bytes || 0) + 'B, ' + ext + ') — rendered as its type in the file pane.';
+    bubble.appendChild(info);
+  } catch (e) {
+    var er = document.createElement('pre');
+    er.textContent = 'view failed: ' + e;
+    bubble.appendChild(er);
+  }
+}
+
+// ============================================================
+// PDF — inline rendering via embedded pdf.js (offline)
+// ============================================================
+function u8from(b64) {
+  var bin = atob(b64);
+  var u = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  return u;
+}
+function pdfOpen(path, b64, bytes) {
+  var wrap = $('pdfWrap');
+  wrap.style.display = 'block';
+  $('pdfPageLabel').textContent = 'loading ' + path + '…';
+  try {
+    if (typeof pdfjsLib === 'undefined') {
+      var sc = document.createElement('script');
+      sc.src = 'pdfjs/pdf.min.js';
+      sc.onload = function () { pdfOpen(path, b64, bytes); };
+      sc.onerror = function () { $('pdfPageLabel').textContent = 'pdf.js failed to load'; };
+      document.head.appendChild(sc);
+      return;
+    }
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'pdfjs/pdf.worker.min.js';
+    pdfjsLib.getDocument({ data: u8from(b64) }).promise.then(function (doc) {
+      __pdfDoc = doc; __pdfNum = 1; __pdfPath = path;
+      st('SELFTEST pdf ok pages=' + doc.numPages + ' ' + path);
+      addMsg('them', path + '  (' + bytes + 'B, ' + doc.numPages + 'p) — rendered below, use prev/next');
+      pdfRender();
+    }).catch(function (e) {
+      $('pdfPageLabel').textContent = 'PDF open failed: ' + e;
+    });
+  } catch (e) {
+    $('pdfPageLabel').textContent = 'PDF error: ' + e;
+  }
+}
+function pdfRender() {
+  if (!__pdfDoc) return;
+  $('pdfPageLabel').textContent = (__pdfPath || '') + ' — page ' + __pdfNum + '/' + __pdfDoc.numPages;
+  __pdfDoc.getPage(__pdfNum).then(function (page) {
+    var scale = 1.2;
+    var vp = page.getViewport(scale);
+    var cv = $('pdfCanvas');
+    cv.width = vp.width; cv.height = vp.height;
+    page.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise.catch(function (e) {});
+  }).catch(function (e) { $('pdfPageLabel').textContent = 'page render failed: ' + e; });
+}
+function pdfNav(delta) {
+  if (!__pdfDoc) return;
+  var n = __pdfNum + delta;
+  if (n < 1 || n > __pdfDoc.numPages) return;
+  __pdfNum = n;
+  pdfRender();
+}
+
+// ============================================================
+// selftest on boot (#selftest fragment)
+// ============================================================
+if (window.__SELFTEST === 1 || location.hash === '#selftest') {
+  showTab('chat');
+  bootChat();
+}
+</script>
+</body>
+</html>
