@@ -111,3 +111,12 @@ adb shell am start -n com.pawwork.android/.MainActivity
 > credential for `github.com/vinothus/pawwork-android`, so the 2026-09-19 work is committed
 > locally (`HEAD` = `2026-09-19 — robust background tool calls + functional APK builds`)
 > but **not pushed**. From your terminal: `cd pawwork-android && git push origin HEAD`.
+
+## 🐾 Runner v3 (built-APK: 3-pane) — 2026-09-19
+Built APKs now open as a **3-pane WebView runner** (home.html 9316 B byte-verified inside template.apk):
+- **▶ Code** — run injected JS or embedded Python (Pyodide) via the Tpl bridge (getConfig/fsRead/fsWrite/fsList/assetList/assetRead/assetRead/mediaList/toast).
+- **📁 Files** — scrollable list of **ALL files** (assets/files/* injected + assets/media/* + runtime-written via PawWork FS); open any file in a scrollable viewer (text/code/markdown in <pre>, images/canvas via base64/img, binary as hex).
+- **🎬 Media** — audio/video injected at build time (build_apk media param → assets/media/*) play inside the WebView via the FS bridge.
+- **💬 Chat** — a local chat tab inside the built APK (wired to a JS-chatbot example). Meaning still pending the user's single-letter pick (a local tab / b offline JS-chatbot / c runtime chat bridge / d all three) — see round commentary.
+Evidence this session: :app:assembleDebug BUILD SUCCESSFUL (main APK 13,310,554 B), template.apk rebuilt via zip swap (home.html 9316 B confirmed), installed on emulator-5554.
+
