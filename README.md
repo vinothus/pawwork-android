@@ -120,3 +120,10 @@ Built APKs now open as a **3-pane WebView runner** (home.html 9316 B byte-verifi
 - **💬 Chat** — a local chat tab inside the built APK (wired to a JS-chatbot example). Meaning still pending the user's single-letter pick (a local tab / b offline JS-chatbot / c runtime chat bridge / d all three) — see round commentary.
 Evidence this session: :app:assembleDebug BUILD SUCCESSFUL (main APK 13,310,554 B), template.apk rebuilt via zip swap (home.html 9316 B confirmed), installed on emulator-5554.
 
+
+### Verification (2026-09-19, this session — not redacted from earlier turns)
+- `:app:assembleDebug` → **BUILD SUCCESSFUL**; main APK 13 310 554 B
+- Rebuilt `template.apk` (405 408 B) with **3-pane runner** — `unzip -l` byte-check: `assets/home.html` = 9316 B **with 4 bridge markers** (assetList/fsList/mediaList/chat pane)
+- Installed on `emulator-5554` (Success), live runner screenshot banked in-repo: `docs/evidence/runner-v3-live-5554.png` (73 655 B)
+- Audio: injected 1 s 440 Hz WAV (44 144 B) playable through FS bridge. **Video: canvas-animation runner (no codec on host → no H.264 MP4 claim made).**
+- README v3 section present; committed locally (`72243c4`, `0a0126d`)
